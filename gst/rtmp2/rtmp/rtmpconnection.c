@@ -846,29 +846,6 @@ gst_rtmp_connection_start_handshake (GstRtmpConnection * connection,
   }
 }
 
-#if 0
-static void
-gst_rtmp_connection_handshake_async (GstRtmpConnection * connection,
-    gboolean is_server, GCancellable * cancellable,
-    GAsyncReadyCallback callback, gpointer user_data)
-{
-  GSimpleAsyncResult *async;
-
-  async = g_simple_async_result_new (G_OBJECT (connection),
-      callback, user_data, gst_rtmp_connection_handshake_async);
-  g_simple_async_result_set_check_cancellable (async, cancellable);
-
-  connection->cancellable = cancellable;
-  connection->async = async;
-
-  if (is_server) {
-    gst_rtmp_connection_server_handshake1 (connection);
-  } else {
-    gst_rtmp_connection_client_handshake1 (connection);
-  }
-}
-#endif
-
 static void
 gst_rtmp_connection_client_handshake1 (GstRtmpConnection * sc)
 {

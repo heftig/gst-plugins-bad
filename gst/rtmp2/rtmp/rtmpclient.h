@@ -69,8 +69,6 @@ struct _GstRtmpClient
   GCond cond;
   GMainContext *context;
 
-  GCancellable *cancellable;
-  GSimpleAsyncResult *async;
   GSocketConnection *socket_connection;
 
   GstRtmpConnection *connection;
