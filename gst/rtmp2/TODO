@@ -16,6 +16,8 @@ Some TODO items:
 
 - Fix g_assert() usage
 
+- Hook up meson build
+
 
 Needed testing:
 
