@@ -55,7 +55,6 @@ struct _GstRtmpConnection
   int state;
   GSocketClient *socket_client;
   GAsyncQueue *output_queue;
-  GSimpleAsyncResult *async;
   gboolean writing;
   GMainContext *main_context;
 

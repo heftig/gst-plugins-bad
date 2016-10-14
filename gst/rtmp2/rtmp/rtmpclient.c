@@ -41,11 +41,6 @@ static void gst_rtmp_client_finalize (GObject * object);
 static void
 gst_rtmp_client_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
-#if 0
-static void
-gst_rtmp_client_handshake_done (GObject * source, GAsyncResult * result,
-    gpointer user_data);
-#endif
 
 enum
 {
@@ -216,30 +211,25 @@ gst_rtmp_client_connect_async (GstRtmpClient * client,
     gpointer user_data)
 {
   GSocketClient *socket_client;
-  GSimpleAsyncResult *async;
+  GTask *task;
   GSocketConnectable *addr;
 
+  task = g_task_new (client, cancellable, callback, user_data);
+
   if (client->state != GST_RTMP_CLIENT_STATE_NEW) {
-    g_simple_async_report_error_in_idle (G_OBJECT (client),
-        callback, user_data, GST_RTMP_ERROR,
+    g_task_return_new_error (task, GST_RTMP_ERROR,
         GST_RTMP_ERROR_TOO_LAZY, "already connected");
+    g_object_unref (task);
     return;
   }
-
-  async = g_simple_async_result_new (G_OBJECT (client),
-      callback, user_data, gst_rtmp_client_connect_async);
-  g_simple_async_result_set_check_cancellable (async, cancellable);
-
-  client->cancellable = cancellable;
-  client->async = async;
 
   addr = g_network_address_new (client->server_address, client->server_port);
   socket_client = g_socket_client_new ();
   g_socket_client_set_timeout (socket_client, client->timeout);
 
   GST_DEBUG ("g_socket_client_connect_async");
-  g_socket_client_connect_async (socket_client, addr,
-      client->cancellable, gst_rtmp_client_connect_done, client);
+  g_socket_client_connect_async (socket_client, addr, cancellable,
+      gst_rtmp_client_connect_done, task);
   g_object_unref (addr);
 }
 
@@ -248,7 +238,8 @@ gst_rtmp_client_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data)
 {
   GSocketClient *socket_client = G_SOCKET_CLIENT (source);
-  GstRtmpClient *client = GST_RTMP_CLIENT (user_data);
+  GTask *task = user_data;
+  GstRtmpClient *client = g_task_get_source_object (task);
   GError *error = NULL;
 
   GST_DEBUG ("g_socket_client_connect_done");
@@ -257,11 +248,8 @@ gst_rtmp_client_connect_done (GObject * source, GAsyncResult * result,
   g_object_unref (socket_client);
   if (client->socket_connection == NULL) {
     GST_ERROR ("error");
-    g_simple_async_result_set_error (client->async, GST_RTMP_ERROR,
-        GST_RTMP_ERROR_TOO_LAZY, "%s", error->message);
-    g_error_free (error);
-    client->cancellable = NULL;
-    g_simple_async_result_complete (client->async);
+    g_task_return_error (task, error);
+    g_object_unref (task);
     return;
   }
 
@@ -269,54 +257,17 @@ gst_rtmp_client_connect_done (GObject * source, GAsyncResult * result,
       client->socket_connection);
   gst_rtmp_connection_start_handshake (client->connection, FALSE);
 
-  g_simple_async_result_complete (client->async);
-  g_object_unref (client->async);
-  client->async = NULL;
+  g_task_return_boolean (task, TRUE);
+  g_object_unref (task);
 }
-
-#if 0
-G_GNUC_UNUSED static void
-gst_rtmp_client_handshake_done (GObject * source, GAsyncResult * result,
-    gpointer user_data)
-{
-  GstRtmpClient *client = GST_RTMP_CLIENT (user_data);
-  GError *error = NULL;
-  gboolean ret;
-
-  GST_DEBUG ("g_socket_client_connect_done");
-  ret = gst_rtmp_connection_handshake_finish (client->connection,
-      result, &error);
-  if (!ret) {
-    g_simple_async_result_set_error (client->async, GST_RTMP_ERROR,
-        GST_RTMP_ERROR_TOO_LAZY, "%s", error->message);
-    g_error_free (error);
-    client->cancellable = NULL;
-    g_simple_async_result_complete (client->async);
-    return;
-  }
-
-  client->cancellable = NULL;
-  g_simple_async_result_complete (client->async);
-}
-#endif
 
 gboolean
 gst_rtmp_client_connect_finish (GstRtmpClient * client,
     GAsyncResult * result, GError ** error)
 {
-  GSimpleAsyncResult *simple;
-  gboolean ret;
-
-  g_return_val_if_fail (g_simple_async_result_is_valid (result,
-          G_OBJECT (client), gst_rtmp_client_connect_async), FALSE);
-
-  simple = (GSimpleAsyncResult *) result;
-
-  ret = TRUE;
-  if (g_simple_async_result_propagate_error (simple, error))
-    ret = FALSE;
-
-  return ret;
+  GTask *task = G_TASK (result);
+  g_return_val_if_fail (g_task_is_valid (task, client), FALSE);
+  return g_task_propagate_boolean (task, error);
 }
 
 GstRtmpConnection *
