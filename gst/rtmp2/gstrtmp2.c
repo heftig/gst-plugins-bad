@@ -21,7 +21,6 @@
 #include "config.h"
 #endif
 
-#include <gst/gst.h>
 #include "gstrtmp2src.h"
 #include "gstrtmp2sink.h"
 
@@ -35,23 +34,6 @@ plugin_init (GstPlugin * plugin)
 
   return TRUE;
 }
-
-/* FIXME: these are normally defined by the GStreamer build system.
-   If you are creating an element to be included in gst-plugins-*,
-   remove these, as they're always defined.  Otherwise, edit as
-   appropriate for your external plugin package. */
-#ifndef VERSION
-#define VERSION "0.0.FIXME"
-#endif
-#ifndef PACKAGE
-#define PACKAGE "FIXME_package"
-#endif
-#ifndef PACKAGE_NAME
-#define PACKAGE_NAME "FIXME_package_name"
-#endif
-#ifndef GST_PACKAGE_ORIGIN
-#define GST_PACKAGE_ORIGIN "http://FIXME.org/"
-#endif
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
     GST_VERSION_MINOR,
