@@ -1,12 +1,46 @@
-
-plugindir = ${libdir}/gstreamer-1.0
-
 plugin_LTLIBRARIES = libgstrtmp2.la
 
-libgstrtmp2_la_SOURCES = gstrtmp2src.c gstrtmp2sink.c gstrtmp2.c
+libgstrtmp2_la_SOURCES = \
+	gstrtmp2.c \
+	gstrtmp2sink.c \
+	gstrtmp2src.c \
+	rtmp/amf.c \
+	rtmp/rtmpchunk.c \
+	rtmp/rtmpclient.c \
+	rtmp/rtmpconnection.c \
+	rtmp/rtmpmessage.c \
+	rtmp/rtmpserver.c \
+	rtmp/rtmpstream.c \
+	rtmp/rtmputils.c \
+	$(NULL)
 
-noinst_HEADERS = gstrtmp2src.h gstrtmp2sink.h
-libgstrtmp2_la_CFLAGS = $(GST_PLUGINS_BASE_CFLAGS) $(GST_BASE_CFLAGS) $(GST_CFLAGS) $(GST_RTMP_CFLAGS)
-libgstrtmp2_la_LIBADD = $(GST_PLUGINS_BASE_LIBS) $(GST_BASE_LIBS) $(GST_LIBS) $(GST_RTMP_LIBS) $(WINSOCK2_LIBS)
+libgstrtmp2_la_CFLAGS = \
+	$(GST_PLUGINS_BASE_CFLAGS) \
+	$(GST_BASE_CFLAGS) \
+	$(GST_CFLAGS) \
+	$(GIO_CFLAGS) \
+	$(NULL)
+
+libgstrtmp2_la_LIBADD = \
+	$(GST_PLUGINS_BASE_LIBS) \
+	$(GST_BASE_LIBS) \
+	$(GST_LIBS) \
+	$(GIO_LIBS) \
+	$(NULL)
+
 libgstrtmp2_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
 libgstrtmp2_la_LIBTOOLFLAGS = $(GST_PLUGIN_LIBTOOLFLAGS)
+
+# headers we need but don't want installed
+noinst_HEADERS = \
+	gstrtmp2sink.h \
+	gstrtmp2src.h \
+	rtmp/amf.h \
+	rtmp/rtmpchunk.h \
+	rtmp/rtmpclient.h \
+	rtmp/rtmpconnection.h \
+	rtmp/rtmpmessage.h \
+	rtmp/rtmpserver.h \
+	rtmp/rtmpstream.h \
+	rtmp/rtmputils.h \
+	$(NULL)
