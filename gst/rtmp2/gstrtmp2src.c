@@ -338,6 +338,7 @@ gst_rtmp2_src_task (gpointer user_data)
 
   gst_rtmp_client_set_server_address (rtmp2src->client,
       rtmp2src->server_address);
+  gst_rtmp_client_set_server_port (rtmp2src->client, rtmp2src->port);
   gst_rtmp_client_connect_async (rtmp2src->client, NULL, connect_done,
       rtmp2src);
 
