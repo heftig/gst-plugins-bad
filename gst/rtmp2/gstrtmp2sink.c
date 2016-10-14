@@ -36,9 +36,10 @@
 #include "config.h"
 #endif
 
+#include "gstrtmp2sink.h"
+
 #include <gst/gst.h>
 #include <gst/base/gstbasesink.h>
-#include "gstrtmp2sink.h"
 #include <string.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp2_sink_debug_category);
@@ -52,8 +53,7 @@ static void gst_rtmp2_sink_set_property (GObject * object,
 static void gst_rtmp2_sink_get_property (GObject * object,
     guint property_id, GValue * value, GParamSpec * pspec);
 static void gst_rtmp2_sink_finalize (GObject * object);
-static void gst_rtmp2_sink_uri_handler_init (gpointer g_iface,
-    gpointer iface_data);
+static void gst_rtmp2_sink_uri_handler_init (GstURIHandlerInterface * iface);
 
 /* GstBaseSink virtual functions */
 static gboolean gst_rtmp2_sink_start (GstBaseSink * sink);
@@ -64,16 +64,7 @@ static GstFlowReturn gst_rtmp2_sink_preroll (GstBaseSink * sink,
 static GstFlowReturn gst_rtmp2_sink_render (GstBaseSink * sink,
     GstBuffer * buffer);
 
-/* URI handler */
-static GstURIType gst_rtmp2_sink_uri_get_type (GType type);
-static const gchar *const *gst_rtmp2_sink_uri_get_protocols (GType type);
-static gchar *gst_rtmp2_sink_uri_get_uri (GstURIHandler * handler);
-static gboolean gst_rtmp2_sink_uri_set_uri (GstURIHandler * handler,
-    const gchar * uri, GError ** error);
-
 /* Internal API */
-static gchar *gst_rtmp2_sink_get_uri (GstRtmp2Sink * sink);
-static gboolean gst_rtmp2_sink_set_uri (GstRtmp2Sink * sink, const char *uri);
 static void gst_rtmp2_sink_task (gpointer user_data);
 static void connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
@@ -97,28 +88,19 @@ static void got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 static void send_secure_token_response (GstRtmp2Sink * rtmp2sink,
     const char *challenge);
 
-
 enum
 {
   PROP_0,
   PROP_LOCATION,
-  PROP_TIMEOUT,
-  PROP_SERVER_ADDRESS,
+  PROP_HOST,
   PROP_PORT,
   PROP_APPLICATION,
   PROP_STREAM,
-  PROP_SECURE_TOKEN
+  PROP_SECURE_TOKEN,
 };
 
-#define DEFAULT_LOCATION "rtmp://localhost/live/myStream"
 #define DEFAULT_TIMEOUT 5
-#define DEFAULT_SERVER_ADDRESS ""
-#define DEFAULT_PORT 1935
-#define DEFAULT_APPLICATION "live"
-#define DEFAULT_STREAM "myStream"
-//#define DEFAULT_SECURE_TOKEN ""
-/* FIXME for testing only */
-#define DEFAULT_SECURE_TOKEN "4305c027c2758beb"
+#define DEFAULT_SECURE_TOKEN ""
 
 /* pad templates */
 
@@ -132,16 +114,11 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 
 /* class initialization */
 
-static void
-do_init (GType g_define_type_id)
-{
-  G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER, gst_rtmp2_sink_uri_handler_init);
-  GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
-      "debug category for rtmp2sink element");
-}
-
 G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
-    do_init (g_define_type_id))
+    G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER,
+        gst_rtmp2_sink_uri_handler_init);
+    G_IMPLEMENT_INTERFACE (GST_TYPE_RTMP2_URI_HANDLER, NULL);
+    )
 
      static void gst_rtmp2_sink_class_init (GstRtmp2SinkClass * klass)
 {
@@ -154,7 +131,7 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
       gst_static_pad_template_get (&gst_rtmp2_sink_sink_template));
 
   gst_element_class_set_static_metadata (GST_ELEMENT_CLASS (klass),
-      "RTMP sink element", "Sink", "Sink element for publishing RTMP streams",
+      "RTMP sink element", "Sink", "Sink element for RTMP streams",
       "David Schleef <ds@schleef.org>");
 
   gobject_class->set_property = gst_rtmp2_sink_set_property;
@@ -166,81 +143,80 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
   base_sink_class->preroll = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_preroll);
   base_sink_class->render = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_render);
 
-  g_object_class_install_property (gobject_class, PROP_LOCATION,
-      g_param_spec_string ("location", "RTMP Location",
-          "Location of the RTMP url to read",
-          DEFAULT_LOCATION, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (gobject_class, PROP_SERVER_ADDRESS,
-      g_param_spec_string ("server-address", "RTMP Server Address",
-          "Address of RTMP server",
-          DEFAULT_SERVER_ADDRESS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (gobject_class, PROP_PORT,
-      g_param_spec_int ("port", "RTMP server port",
-          "RTMP server port (usually 1935)",
-          1, 65535, DEFAULT_PORT, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (gobject_class, PROP_APPLICATION,
-      g_param_spec_string ("application", "RTMP application",
-          "RTMP application",
-          DEFAULT_APPLICATION, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (gobject_class, PROP_STREAM,
-      g_param_spec_string ("stream", "RTMP stream",
-          "RTMP stream",
-          DEFAULT_STREAM, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_override_property (gobject_class, PROP_LOCATION, "location");
+  g_object_class_override_property (gobject_class, PROP_HOST, "host");
+  g_object_class_override_property (gobject_class, PROP_PORT, "port");
+  g_object_class_override_property (gobject_class, PROP_APPLICATION,
+      "application");
+  g_object_class_override_property (gobject_class, PROP_STREAM, "stream");
+
   g_object_class_install_property (gobject_class, PROP_SECURE_TOKEN,
       g_param_spec_string ("secure-token", "Secure token",
           "Secure token used for authentication",
-          DEFAULT_SECURE_TOKEN, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+          DEFAULT_SECURE_TOKEN,
+          G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
+      "debug category for rtmp2sink element");
 }
 
 static void
 gst_rtmp2_sink_init (GstRtmp2Sink * rtmp2sink)
 {
-  rtmp2sink->timeout = DEFAULT_TIMEOUT;
-  gst_rtmp2_sink_set_uri (rtmp2sink, DEFAULT_LOCATION);
-  rtmp2sink->secure_token = g_strdup (DEFAULT_SECURE_TOKEN);
-
   g_mutex_init (&rtmp2sink->lock);
   g_cond_init (&rtmp2sink->cond);
   rtmp2sink->task = gst_task_new (gst_rtmp2_sink_task, rtmp2sink, NULL);
   g_rec_mutex_init (&rtmp2sink->task_lock);
   gst_task_set_lock (rtmp2sink->task, &rtmp2sink->task_lock);
   rtmp2sink->client = gst_rtmp_client_new ();
-  rtmp2sink->connection = gst_rtmp_client_get_connection (rtmp2sink->client);
+  g_object_set (rtmp2sink->client, "timeout", DEFAULT_TIMEOUT, NULL);
+}
 
-  g_object_set (rtmp2sink->client, "timeout", rtmp2sink->timeout, NULL);
+static void
+gst_rtmp2_sink_uri_handler_init (GstURIHandlerInterface * iface)
+{
+  gst_rtmp2_uri_handler_implement_uri_handler (iface, GST_URI_SINK);
 }
 
 void
 gst_rtmp2_sink_set_property (GObject * object, guint property_id,
     const GValue * value, GParamSpec * pspec)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (object);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "set_property");
+  GstRtmp2Sink *self = GST_RTMP2_SINK (object);
 
   switch (property_id) {
     case PROP_LOCATION:
-      gst_rtmp2_sink_set_uri (rtmp2sink, g_value_get_string (value));
+      gst_rtmp2_uri_handler_set_uri (GST_RTMP2_URI_HANDLER (self),
+          g_value_get_string (value));
       break;
-    case PROP_SERVER_ADDRESS:
-      g_free (rtmp2sink->server_address);
-      rtmp2sink->server_address = g_value_dup_string (value);
+    case PROP_HOST:
+      GST_OBJECT_LOCK (self);
+      g_free (self->uri.host);
+      self->uri.host = g_value_dup_string (value);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_PORT:
-      rtmp2sink->port = g_value_get_int (value);
+      GST_OBJECT_LOCK (self);
+      self->uri.port = g_value_get_int (value);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_APPLICATION:
-      g_free (rtmp2sink->application);
-      rtmp2sink->application = g_value_dup_string (value);
+      GST_OBJECT_LOCK (self);
+      g_free (self->uri.application);
+      self->uri.application = g_value_dup_string (value);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_STREAM:
-      g_free (rtmp2sink->stream);
-      rtmp2sink->stream = g_value_dup_string (value);
+      GST_OBJECT_LOCK (self);
+      g_free (self->uri.stream);
+      self->uri.stream = g_value_dup_string (value);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_SECURE_TOKEN:
-      g_free (rtmp2sink->secure_token);
-      rtmp2sink->secure_token = g_value_dup_string (value);
+      GST_OBJECT_LOCK (self);
+      g_free (self->secure_token);
+      self->secure_token = g_value_dup_string (value);
+      GST_OBJECT_UNLOCK (self);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -252,28 +228,38 @@ void
 gst_rtmp2_sink_get_property (GObject * object, guint property_id,
     GValue * value, GParamSpec * pspec)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (object);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "get_property");
+  GstRtmp2Sink *self = GST_RTMP2_SINK (object);
 
   switch (property_id) {
     case PROP_LOCATION:
-      g_value_set_string (value, gst_rtmp2_sink_get_uri (rtmp2sink));
+      GST_OBJECT_LOCK (self);
+      g_value_take_string (value, gst_rtmp2_uri_get_string (&self->uri, TRUE));
+      GST_OBJECT_UNLOCK (self);
       break;
-    case PROP_SERVER_ADDRESS:
-      g_value_set_string (value, rtmp2sink->server_address);
+    case PROP_HOST:
+      GST_OBJECT_LOCK (self);
+      g_value_set_string (value, self->uri.host);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_PORT:
-      g_value_set_int (value, rtmp2sink->port);
+      GST_OBJECT_LOCK (self);
+      g_value_set_int (value, self->uri.port);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_APPLICATION:
-      g_value_set_string (value, rtmp2sink->application);
+      GST_OBJECT_LOCK (self);
+      g_value_set_string (value, self->uri.application);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_STREAM:
-      g_value_set_string (value, rtmp2sink->stream);
+      GST_OBJECT_LOCK (self);
+      g_value_set_string (value, self->uri.stream);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_SECURE_TOKEN:
-      g_value_set_string (value, rtmp2sink->secure_token);
+      GST_OBJECT_LOCK (self);
+      g_value_set_string (value, self->secure_token);
+      GST_OBJECT_UNLOCK (self);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -286,13 +272,8 @@ gst_rtmp2_sink_finalize (GObject * object)
 {
   GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (object);
 
-  GST_DEBUG_OBJECT (rtmp2sink, "finalize");
-
   /* clean up object here */
-  g_free (rtmp2sink->uri);
-  g_free (rtmp2sink->server_address);
-  g_free (rtmp2sink->application);
-  g_free (rtmp2sink->stream);
+  gst_rtmp2_uri_clear (&rtmp2sink->uri);
   g_free (rtmp2sink->secure_token);
   g_object_unref (rtmp2sink->task);
   g_rec_mutex_clear (&rtmp2sink->task_lock);
@@ -301,17 +282,6 @@ gst_rtmp2_sink_finalize (GObject * object)
   g_cond_clear (&rtmp2sink->cond);
 
   G_OBJECT_CLASS (gst_rtmp2_sink_parent_class)->finalize (object);
-}
-
-static void
-gst_rtmp2_sink_uri_handler_init (gpointer g_iface, gpointer iface_data)
-{
-  GstURIHandlerInterface *iface = (GstURIHandlerInterface *) g_iface;
-
-  iface->get_type = gst_rtmp2_sink_uri_get_type;
-  iface->get_protocols = gst_rtmp2_sink_uri_get_protocols;
-  iface->get_uri = gst_rtmp2_sink_uri_get_uri;
-  iface->set_uri = gst_rtmp2_sink_uri_set_uri;
 }
 
 /* start and stop processing, ideal for opening/closing the resource */
@@ -452,107 +422,7 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   return GST_FLOW_OK;
 }
 
-
-/* URL handler */
-
-static GstURIType
-gst_rtmp2_sink_uri_get_type (GType type)
-{
-  return GST_URI_SINK;
-}
-
-static const gchar *const *
-gst_rtmp2_sink_uri_get_protocols (GType type)
-{
-  static const gchar *protocols[] = { "rtmp", NULL };
-
-  return protocols;
-}
-
-static gchar *
-gst_rtmp2_sink_uri_get_uri (GstURIHandler * handler)
-{
-  GstRtmp2Sink *sink = GST_RTMP2_SINK (handler);
-
-  return gst_rtmp2_sink_get_uri (sink);
-}
-
-static gboolean
-gst_rtmp2_sink_uri_set_uri (GstURIHandler * handler, const gchar * uri,
-    GError ** error)
-{
-  GstRtmp2Sink *sink = GST_RTMP2_SINK (handler);
-  gboolean ret;
-
-  ret = gst_rtmp2_sink_set_uri (sink, uri);
-  if (!ret && error) {
-    *error =
-        g_error_new (GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_FAILED,
-        "Invalid URI");
-  }
-
-  return ret;
-}
-
 /* Internal API */
-
-static gchar *
-gst_rtmp2_sink_get_uri (GstRtmp2Sink * sink)
-{
-  if (sink->port == 1935) {
-    return g_strdup_printf ("rtmp://%s/%s/%s", sink->server_address,
-        sink->application, sink->stream);
-  } else {
-    return g_strdup_printf ("rtmp://%s:%d/%s/%s", sink->server_address,
-        sink->port, sink->application, sink->stream);
-  }
-}
-
-/* It would really be awesome if GStreamer had full URI parsing.  Alas. */
-/* FIXME this function needs more error checking, and testing */
-static gboolean
-gst_rtmp2_sink_set_uri (GstRtmp2Sink * sink, const char *uri)
-{
-  gchar *location;
-  gchar **parts;
-  gchar **parts2;
-  gboolean ret;
-
-  GST_DEBUG ("setting uri to %s", uri);
-
-  if (!gst_uri_has_protocol (uri, "rtmp"))
-    return FALSE;
-
-  location = gst_uri_get_location (uri);
-
-  parts = g_strsplit (location, "/", 3);
-  if (parts[0] == NULL || parts[1] == NULL || parts[2] == NULL) {
-    ret = FALSE;
-    goto out;
-  }
-
-  parts2 = g_strsplit (parts[0], ":", 2);
-  if (parts2[1]) {
-    sink->port = g_ascii_strtoull (parts2[1], NULL, 10);
-  } else {
-    sink->port = 1935;
-  }
-  g_free (sink->server_address);
-  sink->server_address = g_strdup (parts2[0]);
-  g_strfreev (parts2);
-
-  g_free (sink->application);
-  sink->application = g_strdup (parts[1]);
-  g_free (sink->stream);
-  sink->stream = g_strdup (parts[2]);
-
-  ret = TRUE;
-
-out:
-  g_free (location);
-  g_strfreev (parts);
-  return ret;
-}
 
 static void
 gst_rtmp2_sink_task (gpointer user_data)
@@ -563,9 +433,8 @@ gst_rtmp2_sink_task (gpointer user_data)
 
   GST_DEBUG ("gst_rtmp2_sink_task starting");
 
-  gst_rtmp_client_set_server_address (rtmp2sink->client,
-      rtmp2sink->server_address);
-  gst_rtmp_client_set_server_port (rtmp2sink->client, rtmp2sink->port);
+  gst_rtmp_client_set_server_address (rtmp2sink->client, rtmp2sink->uri.host);
+  gst_rtmp_client_set_server_port (rtmp2sink->client, rtmp2sink->uri.port);
   gst_rtmp_client_connect_async (rtmp2sink->client, NULL, connect_done,
       rtmp2sink);
 
@@ -601,6 +470,7 @@ connect_done (GObject * source, GAsyncResult * result, gpointer user_data)
     return;
   }
 
+  rtmp2sink->connection = gst_rtmp_client_get_connection (rtmp2sink->client);
   g_signal_connect (rtmp2sink->connection, "got-chunk", G_CALLBACK (got_chunk),
       rtmp2sink);
 
@@ -614,9 +484,9 @@ send_connect (GstRtmp2Sink * rtmp2sink)
   gchar *uri;
 
   node = gst_amf_node_new (GST_AMF_TYPE_OBJECT);
-  gst_amf_object_set_string (node, "app", rtmp2sink->application);
+  gst_amf_object_set_string (node, "app", rtmp2sink->uri.application);
   gst_amf_object_set_string (node, "type", "nonprivate");
-  uri = gst_rtmp2_sink_get_uri (rtmp2sink);
+  uri = gst_rtmp2_uri_get_string (&rtmp2sink->uri, FALSE);
   gst_amf_object_set_string (node, "tcUrl", uri);
   g_free (uri);
   // "fpad": False,
@@ -644,7 +514,7 @@ cmd_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
     if (n) {
       const char *s;
       s = gst_amf_node_get_string (n);
-      if (strcmp (s, "NetConnection.Connect.Success") == 0) {
+      if (g_strcmp0 (s, "NetConnection.Connect.Success") == 0) {
         ret = TRUE;
       }
     }
@@ -677,7 +547,7 @@ send_create_stream (GstRtmp2Sink * rtmp2sink)
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node2, rtmp2sink->stream);
+  gst_amf_node_set_string (node2, rtmp2sink->uri.stream);
   gst_rtmp_connection_send_command (rtmp2sink->connection, 3, "releaseStream",
       2, node, node2, NULL, NULL);
   gst_amf_node_free (node);
@@ -685,7 +555,7 @@ send_create_stream (GstRtmp2Sink * rtmp2sink)
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node2, rtmp2sink->stream);
+  gst_amf_node_set_string (node2, rtmp2sink->uri.stream);
   gst_rtmp_connection_send_command (rtmp2sink->connection, 3, "FCPublish", 3,
       node, node2, NULL, NULL);
   gst_amf_node_free (node);
@@ -729,9 +599,9 @@ send_publish (GstRtmp2Sink * rtmp2sink)
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node2, rtmp2sink->stream);
+  gst_amf_node_set_string (node2, rtmp2sink->uri.stream);
   node3 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node3, rtmp2sink->application);
+  gst_amf_node_set_string (node3, rtmp2sink->uri.application);
   gst_rtmp_connection_send_command2 (rtmp2sink->connection, 4, 1, "publish", 5,
       node, node2, node3, NULL, publish_done, rtmp2sink);
   gst_amf_node_free (node);

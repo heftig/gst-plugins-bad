@@ -2,6 +2,7 @@ plugin_LTLIBRARIES = libgstrtmp2.la
 
 libgstrtmp2_la_SOURCES = \
 	gstrtmp2.c \
+	gstrtmp2urihandler.c \
 	gstrtmp2sink.c \
 	gstrtmp2src.c \
 	rtmp/amf.c \
@@ -33,6 +34,7 @@ libgstrtmp2_la_LIBTOOLFLAGS = $(GST_PLUGIN_LIBTOOLFLAGS)
 
 # headers we need but don't want installed
 noinst_HEADERS = \
+	gstrtmp2urihandler.h \
 	gstrtmp2sink.h \
 	gstrtmp2src.h \
 	rtmp/amf.h \
