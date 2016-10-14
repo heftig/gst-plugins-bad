@@ -565,6 +565,7 @@ gst_rtmp2_sink_task (gpointer user_data)
 
   gst_rtmp_client_set_server_address (rtmp2sink->client,
       rtmp2sink->server_address);
+  gst_rtmp_client_set_server_port (rtmp2sink->client, rtmp2sink->port);
   gst_rtmp_client_connect_async (rtmp2sink->client, NULL, connect_done,
       rtmp2sink);
 
