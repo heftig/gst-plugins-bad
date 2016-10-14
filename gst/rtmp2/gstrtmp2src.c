@@ -51,7 +51,6 @@ static void gst_rtmp2_src_set_property (GObject * object,
     guint property_id, const GValue * value, GParamSpec * pspec);
 static void gst_rtmp2_src_get_property (GObject * object,
     guint property_id, GValue * value, GParamSpec * pspec);
-static void gst_rtmp2_src_dispose (GObject * object);
 static void gst_rtmp2_src_finalize (GObject * object);
 static void gst_rtmp2_src_uri_handler_init (gpointer g_iface,
     gpointer iface_data);
@@ -59,20 +58,8 @@ static void gst_rtmp2_src_uri_handler_init (gpointer g_iface,
 /* GstBaseSrc virtual functions */
 static gboolean gst_rtmp2_src_start (GstBaseSrc * src);
 static gboolean gst_rtmp2_src_stop (GstBaseSrc * src);
-static void gst_rtmp2_src_get_times (GstBaseSrc * src, GstBuffer * buffer,
-    GstClockTime * start, GstClockTime * end);
-static gboolean gst_rtmp2_src_get_size (GstBaseSrc * src, guint64 * size);
-static gboolean gst_rtmp2_src_is_seekable (GstBaseSrc * src);
-static gboolean gst_rtmp2_src_prepare_seek_segment (GstBaseSrc * src,
-    GstEvent * seek, GstSegment * segment);
-static gboolean gst_rtmp2_src_do_seek (GstBaseSrc * src, GstSegment * segment);
 static gboolean gst_rtmp2_src_unlock (GstBaseSrc * src);
-static gboolean gst_rtmp2_src_unlock_stop (GstBaseSrc * src);
-static gboolean gst_rtmp2_src_query (GstBaseSrc * src, GstQuery * query);
-static gboolean gst_rtmp2_src_event (GstBaseSrc * src, GstEvent * event);
 static GstFlowReturn gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset,
-    guint size, GstBuffer ** buf);
-static GstFlowReturn gst_rtmp2_src_alloc (GstBaseSrc * src, guint64 offset,
     guint size, GstBuffer ** buf);
 
 /* URI handler */
@@ -167,23 +154,11 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Src, gst_rtmp2_src, GST_TYPE_PUSH_SRC,
 
   gobject_class->set_property = gst_rtmp2_src_set_property;
   gobject_class->get_property = gst_rtmp2_src_get_property;
-  gobject_class->dispose = gst_rtmp2_src_dispose;
   gobject_class->finalize = gst_rtmp2_src_finalize;
   base_src_class->start = GST_DEBUG_FUNCPTR (gst_rtmp2_src_start);
   base_src_class->stop = GST_DEBUG_FUNCPTR (gst_rtmp2_src_stop);
-  base_src_class->get_times = GST_DEBUG_FUNCPTR (gst_rtmp2_src_get_times);
-  base_src_class->get_size = GST_DEBUG_FUNCPTR (gst_rtmp2_src_get_size);
-  base_src_class->is_seekable = GST_DEBUG_FUNCPTR (gst_rtmp2_src_is_seekable);
-  base_src_class->prepare_seek_segment =
-      GST_DEBUG_FUNCPTR (gst_rtmp2_src_prepare_seek_segment);
-  base_src_class->do_seek = GST_DEBUG_FUNCPTR (gst_rtmp2_src_do_seek);
   base_src_class->unlock = GST_DEBUG_FUNCPTR (gst_rtmp2_src_unlock);
-  base_src_class->unlock_stop = GST_DEBUG_FUNCPTR (gst_rtmp2_src_unlock_stop);
-  if (0)
-    base_src_class->query = GST_DEBUG_FUNCPTR (gst_rtmp2_src_query);
-  base_src_class->event = GST_DEBUG_FUNCPTR (gst_rtmp2_src_event);
   base_src_class->create = GST_DEBUG_FUNCPTR (gst_rtmp2_src_create);
-  base_src_class->alloc = GST_DEBUG_FUNCPTR (gst_rtmp2_src_alloc);
 
   g_object_class_install_property (gobject_class, PROP_LOCATION,
       g_param_spec_string ("location", "RTMP Location",
@@ -312,18 +287,6 @@ gst_rtmp2_src_get_property (GObject * object, guint property_id,
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
   }
-}
-
-void
-gst_rtmp2_src_dispose (GObject * object)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (object);
-
-  GST_DEBUG_OBJECT (rtmp2src, "dispose");
-
-  /* clean up as possible.  may be called multiple times */
-
-  G_OBJECT_CLASS (gst_rtmp2_src_parent_class)->dispose (object);
 }
 
 void
@@ -595,64 +558,6 @@ gst_rtmp2_src_stop (GstBaseSrc * src)
   return TRUE;
 }
 
-/* given a buffer, return start and stop time when it should be pushed
- * out. The base class will sync on the clock using these times. */
-static void
-gst_rtmp2_src_get_times (GstBaseSrc * src, GstBuffer * buffer,
-    GstClockTime * start, GstClockTime * end)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "get_times");
-
-}
-
-/* get the total size of the resource in bytes */
-static gboolean
-gst_rtmp2_src_get_size (GstBaseSrc * src, guint64 * size)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "get_size");
-
-  return TRUE;
-}
-
-/* check if the resource is seekable */
-static gboolean
-gst_rtmp2_src_is_seekable (GstBaseSrc * src)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "is_seekable");
-
-  return FALSE;
-}
-
-/* Prepare the segment on which to perform do_seek(), converting to the
- * current basesrc format. */
-static gboolean
-gst_rtmp2_src_prepare_seek_segment (GstBaseSrc * src, GstEvent * seek,
-    GstSegment * segment)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "prepare_seek_segment");
-
-  return TRUE;
-}
-
-/* notify subclasses of a seek */
-static gboolean
-gst_rtmp2_src_do_seek (GstBaseSrc * src, GstSegment * segment)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "do_seek");
-
-  return TRUE;
-}
-
 /* unlock any pending access to the resource. subclasses should unlock
  * any function ASAP. */
 static gboolean
@@ -666,39 +571,6 @@ gst_rtmp2_src_unlock (GstBaseSrc * src)
   rtmp2src->reset = TRUE;
   g_cond_signal (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
-
-  return TRUE;
-}
-
-/* Clear any pending unlock request, as we succeeded in unlocking */
-static gboolean
-gst_rtmp2_src_unlock_stop (GstBaseSrc * src)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "unlock_stop");
-
-  return TRUE;
-}
-
-/* notify subclasses of a query */
-static gboolean
-gst_rtmp2_src_query (GstBaseSrc * src, GstQuery * query)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "query");
-
-  return TRUE;
-}
-
-/* notify subclasses of an event */
-static gboolean
-gst_rtmp2_src_event (GstBaseSrc * src, GstEvent * event)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "event");
 
   return TRUE;
 }
@@ -758,20 +630,6 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
 
   return GST_FLOW_OK;
 }
-
-/* ask the subclass to allocate an output buffer. The default implementation
- * will use the negotiated allocator. */
-static GstFlowReturn
-gst_rtmp2_src_alloc (GstBaseSrc * src, guint64 offset, guint size,
-    GstBuffer ** buf)
-{
-  GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-
-  GST_DEBUG_OBJECT (rtmp2src, "alloc");
-
-  return GST_FLOW_OK;
-}
-
 
 /* URL handler */
 

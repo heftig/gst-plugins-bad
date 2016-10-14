@@ -51,20 +51,14 @@ static void gst_rtmp2_sink_set_property (GObject * object,
     guint property_id, const GValue * value, GParamSpec * pspec);
 static void gst_rtmp2_sink_get_property (GObject * object,
     guint property_id, GValue * value, GParamSpec * pspec);
-static void gst_rtmp2_sink_dispose (GObject * object);
 static void gst_rtmp2_sink_finalize (GObject * object);
 static void gst_rtmp2_sink_uri_handler_init (gpointer g_iface,
     gpointer iface_data);
 
 /* GstBaseSink virtual functions */
-static void gst_rtmp2_sink_get_times (GstBaseSink * sink, GstBuffer * buffer,
-    GstClockTime * start, GstClockTime * end);
 static gboolean gst_rtmp2_sink_start (GstBaseSink * sink);
 static gboolean gst_rtmp2_sink_stop (GstBaseSink * sink);
 static gboolean gst_rtmp2_sink_unlock (GstBaseSink * sink);
-static gboolean gst_rtmp2_sink_unlock_stop (GstBaseSink * sink);
-static gboolean gst_rtmp2_sink_query (GstBaseSink * sink, GstQuery * query);
-static gboolean gst_rtmp2_sink_event (GstBaseSink * sink, GstEvent * event);
 static GstFlowReturn gst_rtmp2_sink_preroll (GstBaseSink * sink,
     GstBuffer * buffer);
 static GstFlowReturn gst_rtmp2_sink_render (GstBaseSink * sink,
@@ -165,17 +159,10 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
 
   gobject_class->set_property = gst_rtmp2_sink_set_property;
   gobject_class->get_property = gst_rtmp2_sink_get_property;
-  gobject_class->dispose = gst_rtmp2_sink_dispose;
   gobject_class->finalize = gst_rtmp2_sink_finalize;
-  base_sink_class->get_times = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_get_times);
   base_sink_class->start = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_start);
   base_sink_class->stop = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_stop);
   base_sink_class->unlock = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_unlock);
-  base_sink_class->unlock_stop = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_unlock_stop);
-  if (0)
-    base_sink_class->query = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_query);
-  if (0)
-    base_sink_class->event = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_event);
   base_sink_class->preroll = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_preroll);
   base_sink_class->render = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_render);
 
@@ -295,18 +282,6 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
 }
 
 void
-gst_rtmp2_sink_dispose (GObject * object)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (object);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "dispose");
-
-  /* clean up as possible.  may be called multiple times */
-
-  G_OBJECT_CLASS (gst_rtmp2_sink_parent_class)->dispose (object);
-}
-
-void
 gst_rtmp2_sink_finalize (GObject * object)
 {
   GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (object);
@@ -337,17 +312,6 @@ gst_rtmp2_sink_uri_handler_init (gpointer g_iface, gpointer iface_data)
   iface->get_protocols = gst_rtmp2_sink_uri_get_protocols;
   iface->get_uri = gst_rtmp2_sink_uri_get_uri;
   iface->set_uri = gst_rtmp2_sink_uri_set_uri;
-}
-
-/* get the start and end times for syncing on this buffer */
-static void
-gst_rtmp2_sink_get_times (GstBaseSink * sink, GstBuffer * buffer,
-    GstClockTime * start, GstClockTime * end)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "get_times");
-
 }
 
 /* start and stop processing, ideal for opening/closing the resource */
@@ -393,42 +357,6 @@ gst_rtmp2_sink_unlock (GstBaseSink * sink)
   rtmp2sink->reset = TRUE;
   g_cond_signal (&rtmp2sink->cond);
   g_mutex_unlock (&rtmp2sink->lock);
-
-  return TRUE;
-}
-
-/* Clear a previously indicated unlock request not that unlocking is
- * complete. Sub-classes should clear any command queue or indicator they
- * set during unlock */
-static gboolean
-gst_rtmp2_sink_unlock_stop (GstBaseSink * sink)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "unlock_stop");
-
-
-  return TRUE;
-}
-
-/* notify subclass of query */
-static gboolean
-gst_rtmp2_sink_query (GstBaseSink * sink, GstQuery * query)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "query");
-
-  return TRUE;
-}
-
-/* notify subclass of event */
-static gboolean
-gst_rtmp2_sink_event (GstBaseSink * sink, GstEvent * event)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "event");
 
   return TRUE;
 }
