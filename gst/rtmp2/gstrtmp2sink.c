@@ -651,6 +651,18 @@ publish_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
   if (optional_args) {
     stream_id = gst_amf_node_get_number (optional_args);
     ret = TRUE;
+    const GstAmfNode *n = gst_amf_node_get_object (optional_args, "code");
+
+    if (n) {
+      const char *s = gst_amf_node_get_string (n);
+      if (g_str_equal (s, "NetStream.Publish.Denied")) {
+        GST_WARNING_OBJECT (rtmp2sink, "NetStream.Publish.Denied!");
+        ret = FALSE;
+      } else {
+        GST_ERROR_OBJECT (rtmp2sink, "unhandled amf code '%s'", s);
+        ret = FALSE;
+      }
+    }
   }
 
   if (ret) {
