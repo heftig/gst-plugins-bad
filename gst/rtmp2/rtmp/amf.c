@@ -620,6 +620,12 @@ const GstAmfNode *
 gst_amf_node_get_object (const GstAmfNode * node, const char *field_name)
 {
   int i;
+
+  if (!node->array_val) {
+    GST_WARNING ("tried to access array of non-object node");
+    return NULL;
+  }
+
   for (i = 0; i < (int) node->array_val->len; i++) {
     AmfObjectField *field = g_ptr_array_index (node->array_val, i);
     if (strcmp (field->name, field_name) == 0) {
