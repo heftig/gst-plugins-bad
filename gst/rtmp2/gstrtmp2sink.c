@@ -97,6 +97,8 @@ enum
   PROP_APPLICATION,
   PROP_STREAM,
   PROP_SECURE_TOKEN,
+  PROP_USERNAME,
+  PROP_PASSWORD,
 };
 
 #define DEFAULT_TIMEOUT 5
@@ -155,6 +157,9 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
           "Secure token used for authentication",
           DEFAULT_SECURE_TOKEN,
           G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_override_property (gobject_class, PROP_USERNAME, "username");
+  g_object_class_override_property (gobject_class, PROP_PASSWORD, "password");
 
   GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
       "debug category for rtmp2sink element");
@@ -218,6 +223,18 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
       self->secure_token = g_value_dup_string (value);
       GST_OBJECT_UNLOCK (self);
       break;
+    case PROP_USERNAME:
+      GST_OBJECT_LOCK (self);
+      g_free (self->uri.username);
+      self->uri.username = g_value_dup_string (value);
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_PASSWORD:
+      GST_OBJECT_LOCK (self);
+      g_free (self->uri.password);
+      self->uri.password = g_value_dup_string (value);
+      GST_OBJECT_UNLOCK (self);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -259,6 +276,16 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
     case PROP_SECURE_TOKEN:
       GST_OBJECT_LOCK (self);
       g_value_set_string (value, self->secure_token);
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_USERNAME:
+      GST_OBJECT_LOCK (self);
+      g_value_set_string (value, self->uri.username);
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_PASSWORD:
+      GST_OBJECT_LOCK (self);
+      g_value_set_string (value, self->uri.password);
       GST_OBJECT_UNLOCK (self);
       break;
     default:
