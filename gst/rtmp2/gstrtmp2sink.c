@@ -86,10 +86,18 @@ static void publish_done (GstRtmpConnection * connection,
     gpointer user_data);
 static void send_secure_token_response (GTask * task, const char *challenge);
 
+typedef enum
+{
+  GST_RTMP_AUTHMOD_NONE,
+  GST_RTMP_AUTHMOD_ADOBE,
+} GstRtmpAuthmod;
+
 typedef struct
 {
   GstRtmp2URI uri;
   GstRtmpConnection *connection;
+  GstRtmpAuthmod authmod;
+  gchar *auth_query;
 } GstRtmpConnectData;
 
 static GstRtmpConnectData *
@@ -125,6 +133,7 @@ gst_rtmp_connect_data_free (gpointer ptr)
 
   g_clear_pointer (&data->connection, rtmp_connection_close_and_unref);
   gst_rtmp2_uri_clear (&data->uri);
+  g_free (data->auth_query);
   g_slice_free (GstRtmpConnectData, data);
 }
 
@@ -154,7 +163,6 @@ GST_STATIC_PAD_TEMPLATE ("sink",
     GST_STATIC_CAPS ("video/x-flv")
     );
 
-
 /* class initialization */
 
 G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
@@ -162,6 +170,8 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
         gst_rtmp2_sink_uri_handler_init);
     G_IMPLEMENT_INTERFACE (GST_TYPE_RTMP2_URI_HANDLER, NULL);
     )
+
+     static GRegex *auth_regex;
 
      static void gst_rtmp2_sink_class_init (GstRtmp2SinkClass * klass)
 {
@@ -205,6 +215,15 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
 
   GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
       "debug category for rtmp2sink element");
+
+  auth_regex = g_regex_new ("\\[ *AccessManager.Reject *\\] *: *"
+      "\\[ *authmod=adobe *\\] *: *"
+      "\\?reason=needauth"
+      "&user=(?<user>.*?)"
+      "&salt=(?<salt>.*?)"
+      "&challenge=(?<challenge>.*?)"
+      "&opaque=(?<opaque>.*?)\\Z", G_REGEX_DOTALL, 0, NULL);
+  g_warn_if_fail (auth_regex);
 }
 
 static void
@@ -631,6 +650,63 @@ connect_done (GObject * source, GAsyncResult * result, gpointer user_data)
   send_connect (task);
 }
 
+static gchar *
+do_adobe_auth (const gchar * username, const gchar * password,
+    const gchar * salt, const gchar * opaque, const gchar * challenge)
+{
+  guint8 hash[16];              /* MD5 digest */
+  gsize hashlen = sizeof hash;
+  gchar *challenge2, *auth_query;
+  GChecksum *md5;
+
+  md5 = g_checksum_new (G_CHECKSUM_MD5);
+  g_checksum_update (md5, (guchar *) username, -1);
+  g_checksum_update (md5, (guchar *) salt, -1);
+  g_checksum_update (md5, (guchar *) password, -1);
+
+  g_checksum_get_digest (md5, hash, &hashlen);
+  g_warn_if_fail (hashlen == sizeof hash);
+
+  {
+    gchar *hashstr = g_base64_encode ((guchar *) hash, sizeof hash);
+    g_checksum_reset (md5);
+    g_checksum_update (md5, (guchar *) hashstr, -1);
+    g_free (hashstr);
+  }
+
+  if (opaque)
+    g_checksum_update (md5, (guchar *) opaque, -1);
+  else if (challenge)
+    g_checksum_update (md5, (guchar *) challenge, -1);
+
+  challenge2 = g_strdup_printf ("%08x", g_random_int ());
+  g_checksum_update (md5, (guchar *) challenge2, -1);
+
+  g_checksum_get_digest (md5, hash, &hashlen);
+  g_warn_if_fail (hashlen == sizeof hash);
+
+  {
+    gchar *hashstr = g_base64_encode ((guchar *) hash, sizeof hash);
+
+    if (opaque) {
+      auth_query =
+          g_strdup_printf
+          ("authmod=%s&user=%s&challenge=%s&response=%s&opaque=%s", "adobe",
+          username, challenge2, hashstr, opaque);
+    } else {
+      auth_query =
+          g_strdup_printf ("authmod=%s&user=%s&challenge=%s&response=%s",
+          "adobe", username, challenge2, hashstr);
+    }
+    g_free (hashstr);
+  }
+
+  g_checksum_free (md5);
+  g_free (challenge2);
+
+  return auth_query;
+}
+
 static void
 send_connect (GTask * task)
 {
@@ -643,8 +719,28 @@ send_connect (GTask * task)
   app = connect_data->uri.application;
   uri = gst_rtmp2_uri_get_string (&connect_data->uri, FALSE);
 
-  gst_amf_object_set_string (node, "app", app);
-  gst_amf_object_set_string (node, "tcUrl", uri);
+  if (connect_data->authmod == GST_RTMP_AUTHMOD_ADOBE) {
+    gchar *appstr, *uristr;
+
+    if (connect_data->auth_query) {
+      const gchar *query = connect_data->auth_query;
+      appstr = g_strdup_printf ("%s?%s", app, query);
+      uristr = g_strdup_printf ("%s?%s", uri, query);
+    } else {
+      const gchar *user = connect_data->uri.username;
+      appstr = g_strdup_printf ("%s?authmod=adobe&user=%s", app, user);
+      uristr = g_strdup_printf ("%s?authmod=adobe&user=%s", uri, user);
+    }
+
+    gst_amf_object_set_string (node, "app", appstr);
+    gst_amf_object_set_string (node, "tcUrl", uristr);
+
+    g_free (appstr);
+    g_free (uristr);
+  } else {
+    gst_amf_object_set_string (node, "app", app);
+    gst_amf_object_set_string (node, "tcUrl", uri);
+  }
 
   gst_amf_object_set_string (node, "type", "nonprivate");
   gst_amf_object_set_string (node, "flashVer", "FMLE/3.0");
@@ -714,10 +810,59 @@ cmd_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
     }
 
     desc = gst_amf_node_get_string (node);
+    if (g_strrstr (desc, "code=403 need auth; authmod=adobe")) {
+      GST_INFO_OBJECT (rtmp2sink, "requested to do adobe style auth mode");
+
+      if (!connect_data->uri.username || !connect_data->uri.username[0] ||
+          !connect_data->uri.password || !connect_data->uri.password[0]) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "adobe style auth required, but no credentials supplied");
+        g_object_unref (task);
+        return;
+      }
+
+      connect_data->authmod = GST_RTMP_AUTHMOD_ADOBE;
+      do_connect (task);
+      return;
+    }
+
     if (g_strrstr (desc, "?reason=authfailed")) {
       g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
           "authentication failed! wrong credentials?");
       g_object_unref (task);
+      return;
+    }
+
+    if (g_regex_match (auth_regex, desc, 0, &match_info)) {
+      const gchar *username = connect_data->uri.username;
+      const gchar *password = connect_data->uri.password;
+      gchar *salt = g_match_info_fetch_named (match_info, "salt");
+      gchar *challenge = g_match_info_fetch_named (match_info, "challenge");
+      gchar *opaque = g_match_info_fetch_named (match_info, "opaque");
+
+      g_match_info_free (match_info);
+
+      GST_INFO_OBJECT (rtmp2sink,
+          "regex parsed auth... user='%s', salt='%s', challenge='%s', opaque='%s'",
+          GST_STR_NULL (connect_data->uri.username), GST_STR_NULL (salt),
+          GST_STR_NULL (challenge), GST_STR_NULL (opaque));
+
+      g_warn_if_fail (connect_data->authmod == GST_RTMP_AUTHMOD_ADOBE);
+      connect_data->authmod = GST_RTMP_AUTHMOD_ADOBE;
+      connect_data->auth_query =
+          do_adobe_auth (username, password, salt, opaque, challenge);
+      g_free (salt);
+      g_free (opaque);
+      g_free (challenge);
+
+      if (!connect_data->auth_query) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+            "couldn't generate adobe style authentication query");
+        g_object_unref (task);
+        return;
+      }
+
+      do_connect (task);
       return;
     }
 
