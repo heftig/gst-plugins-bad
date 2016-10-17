@@ -52,6 +52,8 @@ struct _GstRtmp2URI
   guint port;
   gchar *application;
   gchar *stream;
+  gchar *username;
+  gchar *password;
 };
 
 void gst_rtmp2_uri_copy (GstRtmp2URI * dest, GstRtmp2URI * src);
