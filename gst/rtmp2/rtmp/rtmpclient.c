@@ -246,6 +246,13 @@ gst_rtmp_client_connect_done (GObject * source, GAsyncResult * result,
   client->socket_connection =
       g_socket_client_connect_finish (socket_client, result, &error);
   g_object_unref (socket_client);
+
+  if (g_task_return_error_if_cancelled (task)) {
+    GST_DEBUG ("was cancelled");
+    g_object_unref (task);
+    return;
+  }
+
   if (client->socket_connection == NULL) {
     GST_ERROR ("error");
     g_task_return_error (task, error);
