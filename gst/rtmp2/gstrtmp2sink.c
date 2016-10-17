@@ -614,7 +614,8 @@ create_stream_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
     GST_DEBUG ("createStream success, stream_id=%d", stream_id);
     send_publish (rtmp2sink);
   } else {
-    GST_ERROR ("createStream failed");
+    GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, OPEN_READ,
+        ("createStream failed"), (NULL));
   }
 }
 
@@ -660,7 +661,8 @@ publish_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
     g_cond_signal (&rtmp2sink->cond);
     g_mutex_unlock (&rtmp2sink->lock);
   } else {
-    GST_ERROR ("publish failed");
+    GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, OPEN_READ,
+        ("publish failed"), (NULL));
   }
 }
 
