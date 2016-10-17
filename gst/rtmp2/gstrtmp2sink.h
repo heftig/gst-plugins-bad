@@ -27,6 +27,7 @@
 #include <rtmp/rtmputils.h>
 
 G_BEGIN_DECLS
+
 #define GST_TYPE_RTMP2_SINK   (gst_rtmp2_sink_get_type())
 #define GST_RTMP2_SINK(obj)   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_RTMP2_SINK,GstRtmp2Sink))
 #define GST_RTMP2_SINK_CLASS(klass)   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_RTMP2_SINK,GstRtmp2SinkClass))
@@ -46,15 +47,13 @@ struct _GstRtmp2Sink
   /* stuff */
   GMutex lock;
   GCond cond;
-  gboolean reset;
+  gboolean flushing;
   GstTask *task;
   GRecMutex task_lock;
   GMainLoop *task_main_loop;
 
-  GstRtmpClient *client;
+  GTask *connect_task;
   GstRtmpConnection *connection;
-  gboolean is_connected;
-  gboolean dump;
 };
 
 struct _GstRtmp2SinkClass
