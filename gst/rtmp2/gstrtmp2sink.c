@@ -102,6 +102,7 @@ enum
 };
 
 #define DEFAULT_TIMEOUT 5
+#define DEFAULT_PUBLISHING_TYPE "live"
 #define DEFAULT_SECURE_TOKEN ""
 
 /* pad templates */
@@ -628,7 +629,7 @@ send_publish (GstRtmp2Sink * rtmp2sink)
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
   gst_amf_node_set_string (node2, rtmp2sink->uri.stream);
   node3 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node3, rtmp2sink->uri.application);
+  gst_amf_node_set_string (node3, DEFAULT_PUBLISHING_TYPE);
   gst_rtmp_connection_send_command2 (rtmp2sink->connection, 4, 1, "publish", 5,
       node, node2, node3, NULL, publish_done, rtmp2sink);
   gst_amf_node_free (node);
