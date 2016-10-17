@@ -174,6 +174,9 @@ gst_rtmp_connection_dispose (GObject * object)
 
   /* clean up as possible.  may be called multiple times */
 
+  gst_rtmp_connection_close (rtmpconnection);
+  g_cancellable_cancel (rtmpconnection->cancellable);
+
   G_OBJECT_CLASS (gst_rtmp_connection_parent_class)->dispose (object);
 }
 
@@ -181,30 +184,14 @@ void
 gst_rtmp_connection_finalize (GObject * object)
 {
   GstRtmpConnection *rtmpconnection = GST_RTMP_CONNECTION (object);
-  GSocket *sock;
   gpointer p;
 
   GST_DEBUG_OBJECT (rtmpconnection, "finalize");
 
   /* clean up object here */
 
-  gst_rtmp_connection_close (rtmpconnection);
-
-  g_cancellable_cancel (rtmpconnection->cancellable);
   g_clear_object (&rtmpconnection->cancellable);
-
-  if (rtmpconnection->connection) {
-    sock = g_socket_connection_get_socket (rtmpconnection->connection);
-    g_object_ref (sock);
-    g_clear_object (&rtmpconnection->connection);
-    /* FIXME force destruction of the GSocket */
-    if (GST_OBJECT_REFCOUNT (sock) > 1) {
-      GST_ERROR ("hacking unref of socket (refcount=%d)",
-          GST_OBJECT_REFCOUNT (sock));
-      g_object_unref (sock);
-    }
-    g_object_unref (sock);
-  }
+  g_clear_object (&rtmpconnection->connection);
 
   p = g_async_queue_try_pop (rtmpconnection->output_queue);
   while (p) {
@@ -241,11 +228,13 @@ gst_rtmp_connection_set_socket_connection (GstRtmpConnection * sc,
   /* refs the socket because it's creating an input stream, which holds a ref */
   is = g_io_stream_get_input_stream (G_IO_STREAM (sc->connection));
   /* refs the socket because it's creating a socket source */
+  g_warn_if_fail (!sc->input_source);
   sc->input_source =
       g_pollable_input_stream_create_source (G_POLLABLE_INPUT_STREAM (is),
       sc->cancellable);
   g_source_set_callback (sc->input_source,
-      (GSourceFunc) gst_rtmp_connection_input_ready, sc, NULL);
+      (GSourceFunc) gst_rtmp_connection_input_ready, g_object_ref (sc),
+      g_object_unref);
   g_source_attach (sc->input_source, sc->main_context);
 }
 
@@ -260,13 +249,11 @@ gst_rtmp_connection_close (GstRtmpConnection * connection)
 
   if (connection->input_source) {
     g_source_destroy (connection->input_source);
-    g_source_unref (connection->input_source);
-    connection->input_source = NULL;
+    g_clear_pointer (&connection->input_source, g_source_unref);
   }
   if (connection->output_source) {
     g_source_destroy (connection->output_source);
-    g_source_unref (connection->output_source);
-    connection->output_source = NULL;
+    g_clear_pointer (&connection->output_source, g_source_unref);
   }
 
 }
@@ -284,11 +271,13 @@ start_output (gpointer user_priv)
     return G_SOURCE_REMOVE;
 
   os = g_io_stream_get_output_stream (G_IO_STREAM (sc->connection));
+  g_warn_if_fail (!sc->output_source);
   sc->output_source =
       g_pollable_output_stream_create_source (G_POLLABLE_OUTPUT_STREAM (os),
       sc->cancellable);
   g_source_set_callback (sc->output_source,
-      (GSourceFunc) gst_rtmp_connection_output_ready, sc, NULL);
+      (GSourceFunc) gst_rtmp_connection_output_ready, g_object_ref (sc),
+      g_object_unref);
   g_source_attach (sc->output_source, sc->main_context);
 
   return G_SOURCE_REMOVE;
@@ -300,19 +289,27 @@ gst_rtmp_connection_start_output (GstRtmpConnection * sc)
   GSource *source;
 
   source = g_idle_source_new ();
-  g_source_set_callback (source, start_output, sc, NULL);
+  g_source_set_callback (source, start_output, g_object_ref (sc),
+      g_object_unref);
   g_source_attach (source, sc->main_context);
 }
 
 static gboolean
 gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
 {
-  GstRtmpConnection *sc = GST_RTMP_CONNECTION (user_data);
+  GstRtmpConnection *sc;
   guint8 *data;
   gssize ret;
   GError *error = NULL;
 
   GST_DEBUG ("input ready");
+
+  if (g_source_is_destroyed (g_main_current_source ())) {
+    GST_DEBUG ("spurious input_ready callback");
+    return G_SOURCE_REMOVE;
+  }
+
+  sc = GST_RTMP_CONNECTION (user_data);
   if (sc->thread != g_thread_self ()) {
     GST_ERROR ("input_ready: Called from wrong thread");
   }
@@ -373,12 +370,19 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
 static gboolean
 gst_rtmp_connection_output_ready (GOutputStream * os, gpointer user_data)
 {
-  GstRtmpConnection *sc = GST_RTMP_CONNECTION (user_data);
+  GstRtmpConnection *sc;
   GstRtmpChunk *chunk;
   const guint8 *data;
   gsize size;
 
   GST_DEBUG ("output ready");
+
+  if (g_source_is_destroyed (g_main_current_source ())) {
+    GST_DEBUG ("spurious output_ready callback");
+    return G_SOURCE_REMOVE;
+  }
+
+  sc = GST_RTMP_CONNECTION (user_data);
   if (sc->thread != g_thread_self ()) {
     GST_ERROR ("input_ready: Called from wrong thread");
   }
@@ -411,7 +415,7 @@ gst_rtmp_connection_output_ready (GOutputStream * os, gpointer user_data)
   os = g_io_stream_get_output_stream (G_IO_STREAM (sc->connection));
   data = g_bytes_get_data (sc->output_bytes, &size);
   g_output_stream_write_async (os, data, size, G_PRIORITY_DEFAULT,
-      sc->cancellable, gst_rtmp_connection_write_chunk_done, sc);
+      sc->cancellable, gst_rtmp_connection_write_chunk_done, g_object_ref (sc));
   sc->writing = TRUE;
 
   return G_SOURCE_REMOVE;
@@ -443,6 +447,7 @@ gst_rtmp_connection_write_chunk_done (GObject * obj,
     GST_DEBUG ("write error: %s", error->message);
     gst_rtmp_connection_got_closed (connection);
     g_error_free (error);
+    g_object_unref (connection);
     return;
   }
   if (ret < (gssize) g_bytes_get_size (connection->output_bytes)) {
@@ -459,6 +464,7 @@ gst_rtmp_connection_write_chunk_done (GObject * obj,
   }
 
   gst_rtmp_connection_start_output (connection);
+  g_object_unref (connection);
 }
 
 
