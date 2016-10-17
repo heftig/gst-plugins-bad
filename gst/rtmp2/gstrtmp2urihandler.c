@@ -25,6 +25,8 @@
 #define DEFAULT_LOCATION "rtmp://" DEFAULT_HOST "/" DEFAULT_APPLICATION "/" DEFAULT_STREAM
 #define DEFAULT_PORT 1935
 #define DEFAULT_SECURE_TOKEN ""
+#define DEFAULT_USERNAME ""
+#define DEFAULT_PASSWORD ""
 
 G_DEFINE_INTERFACE (GstRtmp2URIHandler, gst_rtmp2_uri_handler,
     GST_TYPE_URI_HANDLER);
@@ -55,6 +57,12 @@ gst_rtmp2_uri_handler_default_init (GstRtmp2URIHandlerInterface * iface)
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_string ("stream",
           "Stream", "RTMP stream name", DEFAULT_STREAM,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_interface_install_property (iface, g_param_spec_string ("username",
+          "User name", "RTMP authentication user name", DEFAULT_USERNAME,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_interface_install_property (iface, g_param_spec_string ("password",
+          "Password", "RTMP authentication password", DEFAULT_PASSWORD,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
@@ -90,7 +98,7 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
 {
   GstRtmp2URIHandler *self = GST_RTMP2_URI_HANDLER (handler);
   GstUri *uri;
-  const gchar *host;
+  const gchar *host, *userinfo;
   guint port, nsegments;
   GList *segments = NULL;
   gboolean ret = FALSE;
@@ -129,6 +137,21 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   g_object_set (self, "host", host, "port", port,
       "application", g_list_nth_data (segments, 1),
       "stream", g_list_nth_data (segments, 2), NULL);
+
+  userinfo = gst_uri_get_userinfo (uri);
+  if (userinfo) {
+    gchar **split = g_strsplit (userinfo, ":", 2);
+
+    if (!split || !split[0] || !split[1]) {
+      g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+          "Failed to parse username:password data");
+      g_strfreev (split);
+      goto out;
+    }
+
+    g_object_set (self, "username", split[0], "password", split[1], NULL);
+    g_strfreev (split);
+  }
 
   ret = TRUE;
 
@@ -195,6 +218,8 @@ gst_rtmp2_uri_copy (GstRtmp2URI * dest, GstRtmp2URI * src)
   dest->port = src->port;
   dest->application = g_strdup (src->application);
   dest->stream = g_strdup (src->stream);
+  dest->username = g_strdup (src->username);
+  dest->password = g_strdup (src->password);
 }
 
 void
@@ -206,6 +231,8 @@ gst_rtmp2_uri_clear (GstRtmp2URI * uri)
   uri->port = 0;
   g_clear_pointer (&uri->application, g_free);
   g_clear_pointer (&uri->stream, g_free);
+  g_clear_pointer (&uri->username, g_free);
+  g_clear_pointer (&uri->password, g_free);
 }
 
 gchar *
