@@ -375,7 +375,7 @@ gst_rtmp_connection_output_ready (GOutputStream * os, gpointer user_data)
   const guint8 *data;
   gsize size;
 
-  GST_DEBUG ("output ready");
+  GST_LOG ("output ready");
 
   if (g_source_is_destroyed (g_main_current_source ())) {
     GST_DEBUG ("spurious output_ready callback");
@@ -438,7 +438,7 @@ gst_rtmp_connection_write_chunk_done (GObject * obj,
   GError *error = NULL;
   gssize ret;
 
-  GST_DEBUG ("gst_rtmp_connection_write_chunk_done");
+  GST_LOG ("gst_rtmp_connection_write_chunk_done");
 
   connection->writing = FALSE;
 

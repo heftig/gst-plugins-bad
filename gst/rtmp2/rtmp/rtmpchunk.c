@@ -103,7 +103,7 @@ gst_rtmp_chunk_dispose (GObject * object)
 {
   GstRtmpChunk *rtmpchunk = GST_RTMP_CHUNK (object);
 
-  GST_DEBUG_OBJECT (rtmpchunk, "dispose");
+  GST_TRACE_OBJECT (rtmpchunk, "dispose");
 
   /* clean up as possible.  may be called multiple times */
 
@@ -115,7 +115,7 @@ gst_rtmp_chunk_finalize (GObject * object)
 {
   GstRtmpChunk *rtmpchunk = GST_RTMP_CHUNK (object);
 
-  GST_DEBUG_OBJECT (rtmpchunk, "finalize");
+  GST_TRACE_OBJECT (rtmpchunk, "finalize");
 
   /* clean up object here */
   if (rtmpchunk->payload) {
