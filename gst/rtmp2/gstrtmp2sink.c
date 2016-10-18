@@ -86,17 +86,11 @@ static void publish_done (GstRtmpConnection * connection,
     gpointer user_data);
 static void send_secure_token_response (GTask * task, const char *challenge);
 
-typedef enum
-{
-  GST_RTMP_AUTHMOD_NONE,
-  GST_RTMP_AUTHMOD_ADOBE,
-} GstRtmpAuthmod;
-
 typedef struct
 {
   GstRtmp2URI uri;
   GstRtmpConnection *connection;
-  GstRtmpAuthmod authmod;
+  GstRtmpAuthmod authmod;       /* current state */
   gchar *auth_query;
 } GstRtmpConnectData;
 
@@ -148,11 +142,13 @@ enum
   PROP_SECURE_TOKEN,
   PROP_USERNAME,
   PROP_PASSWORD,
+  PROP_AUTH_METHOD
 };
 
 #define DEFAULT_TIMEOUT 5
 #define DEFAULT_PUBLISHING_TYPE "live"
 #define DEFAULT_SECURE_TOKEN ""
+#define DEFAULT_AUTH_METHOD  GST_RTMP_AUTHMOD_AUTO
 
 /* pad templates */
 
@@ -168,8 +164,7 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
     G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER,
         gst_rtmp2_sink_uri_handler_init);
-    G_IMPLEMENT_INTERFACE (GST_TYPE_RTMP2_URI_HANDLER, NULL);
-    )
+    G_IMPLEMENT_INTERFACE (GST_TYPE_RTMP2_URI_HANDLER, NULL);)
 
      static GRegex *auth_regex;
 
@@ -213,6 +208,12 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
   g_object_class_override_property (gobject_class, PROP_USERNAME, "username");
   g_object_class_override_property (gobject_class, PROP_PASSWORD, "password");
 
+  g_object_class_install_property (gobject_class, PROP_AUTH_METHOD,
+      g_param_spec_enum ("auth", "Auth Method",
+          "Select the authorization method",
+          GST_TYPE_RTMP2_AUTH_METHOD, DEFAULT_AUTH_METHOD,
+          G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
       "debug category for rtmp2sink element");
 
@@ -240,6 +241,24 @@ static void
 gst_rtmp2_sink_uri_handler_init (GstURIHandlerInterface * iface)
 {
   gst_rtmp2_uri_handler_implement_uri_handler (iface, GST_URI_SINK);
+}
+
+GType
+gst_rtmp2_auth_method_get_type (void)
+{
+  static volatile gsize auth_method_type = 0;
+  static const GEnumValue auth_method[] = {
+    {GST_RTMP_AUTHMOD_NONE, "GST_RTMP_AUTHMOD_NONE", "none"},
+    {GST_RTMP_AUTHMOD_AUTO, "GST_RTMP_AUTHMOD_AUTO", "auto"},
+    {GST_RTMP_AUTHMOD_ADOBE, "GST_RTMP_AUTHMOD_ADOBE", "adobe"},
+    {0, NULL, NULL},
+  };
+
+  if (g_once_init_enter (&auth_method_type)) {
+    GType tmp = g_enum_register_static ("GstRtmpAuthmod", auth_method);
+    g_once_init_leave (&auth_method_type, tmp);
+  }
+  return (GType) auth_method_type;
 }
 
 void
@@ -294,6 +313,22 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
       self->uri.password = g_value_dup_string (value);
       GST_OBJECT_UNLOCK (self);
       break;
+    case PROP_AUTH_METHOD:
+    {
+      GstRtmpAuthmod mode = g_value_get_enum (value);
+      GEnumValue *val =
+          g_enum_get_value (G_ENUM_CLASS (g_type_class_ref
+              (GST_TYPE_RTMP2_AUTH_METHOD)), mode);
+      const gchar *value_nick = val->value_nick;
+      GST_OBJECT_LOCK (self);
+      if (self->auth_method != mode) {
+        self->auth_method = mode;
+        GST_INFO_OBJECT (self, "successfully set auth method to %s (%i)",
+            value_nick, mode);
+      }
+      GST_OBJECT_UNLOCK (self);
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -345,6 +380,11 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
     case PROP_PASSWORD:
       GST_OBJECT_LOCK (self);
       g_value_set_string (value, self->uri.password);
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_AUTH_METHOD:
+      GST_OBJECT_LOCK (self);
+      g_value_set_enum (value, self->auth_method);
       GST_OBJECT_UNLOCK (self);
       break;
     default:
@@ -459,7 +499,7 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   gsize size;
   guint8 *data;
 
-  GST_DEBUG_OBJECT (rtmp2sink, "render");
+  GST_LOG_OBJECT (rtmp2sink, "render");
 
   size = gst_buffer_get_size (buffer);
   gst_buffer_extract_dup (buffer, 0, size, (gpointer *) & data, &size);
@@ -719,7 +759,7 @@ send_connect (GTask * task)
   app = connect_data->uri.application;
   uri = gst_rtmp2_uri_get_string (&connect_data->uri, FALSE);
 
-  if (connect_data->authmod == GST_RTMP_AUTHMOD_ADOBE) {
+  if (connect_data->authmod > GST_RTMP_AUTHMOD_NONE) {
     gchar *appstr, *uristr;
 
     if (connect_data->auth_query) {
@@ -728,8 +768,9 @@ send_connect (GTask * task)
       uristr = g_strdup_printf ("%s?%s", uri, query);
     } else {
       const gchar *user = connect_data->uri.username;
-      appstr = g_strdup_printf ("%s?authmod=adobe&user=%s", app, user);
-      uristr = g_strdup_printf ("%s?authmod=adobe&user=%s", uri, user);
+      const gchar *authmod = g_strdup ("adobe");
+      appstr = g_strdup_printf ("%s?authmod=%s&user=%s", app, authmod, user);
+      uristr = g_strdup_printf ("%s?authmod=%s&user=%s", uri, authmod, user);
     }
 
     gst_amf_object_set_string (node, "app", appstr);
@@ -811,8 +852,18 @@ cmd_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 
     desc = gst_amf_node_get_string (node);
     if (g_strrstr (desc, "code=403 need auth; authmod=adobe")) {
-      GST_INFO_OBJECT (rtmp2sink, "requested to do adobe style auth mode");
+      GST_INFO_OBJECT (rtmp2sink, "server requires adobe style auth mode");
 
+      if (!(rtmp2sink->auth_method == GST_RTMP_AUTHMOD_AUTO ||
+              rtmp2sink->auth_method == GST_RTMP_AUTHMOD_ADOBE)) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "adobe style auth required, but incompatible auth method %s selected",
+            g_enum_get_value (G_ENUM_CLASS (g_type_class_ref
+                    (GST_TYPE_RTMP2_AUTH_METHOD)),
+                rtmp2sink->auth_method)->value_nick);
+        g_object_unref (task);
+        return;
+      }
       if (!connect_data->uri.username || !connect_data->uri.username[0] ||
           !connect_data->uri.password || !connect_data->uri.password[0]) {
         g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,

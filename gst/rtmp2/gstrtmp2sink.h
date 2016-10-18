@@ -28,6 +28,15 @@
 
 G_BEGIN_DECLS
 
+typedef enum
+{
+  GST_RTMP_AUTHMOD_NONE = 0,
+  GST_RTMP_AUTHMOD_AUTO,
+  GST_RTMP_AUTHMOD_ADOBE,
+} GstRtmpAuthmod;
+
+#define GST_TYPE_RTMP2_AUTH_METHOD (gst_rtmp2_auth_method_get_type ())
+
 #define GST_TYPE_RTMP2_SINK   (gst_rtmp2_sink_get_type())
 #define GST_RTMP2_SINK(obj)   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_RTMP2_SINK,GstRtmp2Sink))
 #define GST_RTMP2_SINK_CLASS(klass)   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_RTMP2_SINK,GstRtmp2SinkClass))
@@ -43,6 +52,7 @@ struct _GstRtmp2Sink
   /* properties */
   GstRtmp2URI uri;
   gchar *secure_token;
+  GstRtmpAuthmod auth_method;
 
   /* stuff */
   GMutex lock;
@@ -62,6 +72,7 @@ struct _GstRtmp2SinkClass
 };
 
 GType gst_rtmp2_sink_get_type (void);
+GType gst_rtmp2_auth_method_get_type (void);
 
 G_END_DECLS
 #endif
