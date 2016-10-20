@@ -3,13 +3,9 @@ Some TODO items:
 
 - connection timeouts don't cause an element error
 
-- tcUrl is sent incorrectly.  Should not contain stream name.
-
 - AMF parsing should be doing bounds checking
 
 - rename chunk to message to match RTMP spec usage
-
-- URL parsing neneds bounds checking
 
 - rtmp2sink: Should look into reconnecting and resuming stream without
   deleting and recreating stream, which drops clients.
