@@ -17,39 +17,40 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "gstrtmp2urihandler.h"
+#include "gstrtmp2locationhandler.h"
+#include "rtmp/rtmputils.h"
+#include "rtmp/rtmpclient.h"
 
 #define DEFAULT_HOST "localhost"
 #define DEFAULT_APPLICATION "live"
 #define DEFAULT_STREAM "myStream"
 #define DEFAULT_LOCATION "rtmp://" DEFAULT_HOST "/" DEFAULT_APPLICATION "/" DEFAULT_STREAM
-#define DEFAULT_PORT 1935
 #define DEFAULT_SECURE_TOKEN ""
 #define DEFAULT_USERNAME ""
 #define DEFAULT_PASSWORD ""
+#define DEFAULT_SECURE_TOKEN ""
+#define DEFAULT_AUTHMOD  GST_RTMP_AUTHMOD_AUTO
+#define DEFAULT_TIMEOUT 5
 
-G_DEFINE_INTERFACE (GstRtmp2URIHandler, gst_rtmp2_uri_handler,
-    GST_TYPE_URI_HANDLER);
+G_DEFINE_INTERFACE (GstRtmpLocationHandler, gst_rtmp_location_handler, 0);
 
-#define GST_CAT_DEFAULT gst_rtmp2_uri_handler_debug_category
+#define GST_CAT_DEFAULT gst_rtmp_location_handler_debug_category
 GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
 
 static void
-gst_rtmp2_uri_handler_default_init (GstRtmp2URIHandlerInterface * iface)
+gst_rtmp_location_handler_default_init (GstRtmpLocationHandlerInterface * iface)
 {
   GST_DEBUG_CATEGORY_INIT (GST_CAT_DEFAULT, "rtmp2urihandler", 0,
       "RTMP2 URI Handling");
 
-  g_object_interface_install_property (iface,
-      g_param_spec_string ("location", "Location",
-          "Location of RTMP stream to access",
-          DEFAULT_LOCATION,
+  g_object_interface_install_property (iface, g_param_spec_string ("location",
+          "Location", "Location of RTMP stream to access", DEFAULT_LOCATION,
           G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_string ("host",
           "Host", "RTMP server host name", DEFAULT_HOST,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_int ("port", "Port",
-          "RTMP server port", 1, 65535, DEFAULT_PORT,
+          "RTMP server port", 1, 65535, GST_RTMP_DEFAULT_PORT,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface,
       g_param_spec_string ("application", "Application",
@@ -59,11 +60,22 @@ gst_rtmp2_uri_handler_default_init (GstRtmp2URIHandlerInterface * iface)
           "Stream", "RTMP stream name", DEFAULT_STREAM,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_string ("username",
-          "User name", "RTMP authentication user name", DEFAULT_USERNAME,
+          "User name", "RTMP authorization user name", DEFAULT_USERNAME,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_string ("password",
-          "Password", "RTMP authentication password", DEFAULT_PASSWORD,
+          "Password", "RTMP authorization password", DEFAULT_PASSWORD,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_interface_install_property (iface,
+      g_param_spec_string ("secure-token", "Secure token",
+          "RTMP authorization token", DEFAULT_SECURE_TOKEN,
+          G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_interface_install_property (iface, g_param_spec_enum ("authmod",
+          "Authorization mode", "RTMP authorization mode",
+          GST_TYPE_RTMP_AUTHMOD, DEFAULT_AUTHMOD,
+          G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_interface_install_property (iface, g_param_spec_uint ("timeout",
+          "Timeout", "RTMP timeout in seconds", 0, G_MAXUINT, DEFAULT_TIMEOUT,
+          G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static GstURIType
@@ -88,15 +100,22 @@ uri_handler_get_protocols (GType type)
 static gchar *
 uri_handler_get_uri (GstURIHandler * handler)
 {
-  GstRtmp2URIHandler *self = GST_RTMP2_URI_HANDLER (handler);
-  return gst_rtmp2_uri_handler_get_uri (self);
+  GstRtmpLocation location = { NULL, };
+  gchar *string;
+
+  g_object_get (handler, "host", &location.host, "port", &location.port,
+      "application", &location.application, "stream", &location.stream, NULL);
+
+  string = gst_rtmp_location_get_string (&location, TRUE);
+  gst_rtmp_location_clear (&location);
+  return string;
 }
 
 static gboolean
 uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     GError ** error)
 {
-  GstRtmp2URIHandler *self = GST_RTMP2_URI_HANDLER (handler);
+  GstRtmpLocationHandler *self = GST_RTMP_LOCATION_HANDLER (handler);
   GstUri *uri;
   const gchar *host, *userinfo;
   guint port, nsegments;
@@ -131,7 +150,7 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
 
   port = gst_uri_get_port (uri);
   if (port == GST_URI_NO_PORT) {
-    port = DEFAULT_PORT;
+    port = GST_RTMP_DEFAULT_PORT;
   }
 
   g_object_set (self, "host", host, "port", port,
@@ -162,7 +181,7 @@ out:
 }
 
 void
-gst_rtmp2_uri_handler_implement_uri_handler (GstURIHandlerInterface * iface,
+gst_rtmp_location_handler_implement_uri_handler (GstURIHandlerInterface * iface,
     GstURIType type)
 {
   switch (type) {
@@ -180,22 +199,9 @@ gst_rtmp2_uri_handler_implement_uri_handler (GstURIHandlerInterface * iface,
   iface->set_uri = uri_handler_set_uri;
 }
 
-gchar *
-gst_rtmp2_uri_handler_get_uri (GstRtmp2URIHandler * handler)
-{
-  GstRtmp2URI uri = { NULL, };
-  gchar *string;
-
-  g_object_get (handler, "host", &uri.host, "port", &uri.port,
-      "application", &uri.application, "stream", &uri.stream, NULL);
-
-  string = gst_rtmp2_uri_get_string (&uri, TRUE);
-  gst_rtmp2_uri_clear (&uri);
-  return string;
-}
-
 gboolean
-gst_rtmp2_uri_handler_set_uri (GstRtmp2URIHandler * handler, const gchar * uri)
+gst_rtmp_location_handler_set_uri (GstRtmpLocationHandler * handler,
+    const gchar * uri)
 {
   GError *error = NULL;
   gboolean ret;
@@ -206,52 +212,4 @@ gst_rtmp2_uri_handler_set_uri (GstRtmp2URIHandler * handler, const gchar * uri)
     g_error_free (error);
   }
   return ret;
-}
-
-void
-gst_rtmp2_uri_copy (GstRtmp2URI * dest, GstRtmp2URI * src)
-{
-  g_return_if_fail (dest);
-  g_return_if_fail (src);
-
-  dest->host = g_strdup (src->host);
-  dest->port = src->port;
-  dest->application = g_strdup (src->application);
-  dest->stream = g_strdup (src->stream);
-  dest->username = g_strdup (src->username);
-  dest->password = g_strdup (src->password);
-}
-
-void
-gst_rtmp2_uri_clear (GstRtmp2URI * uri)
-{
-  g_return_if_fail (uri);
-
-  g_clear_pointer (&uri->host, g_free);
-  uri->port = 0;
-  g_clear_pointer (&uri->application, g_free);
-  g_clear_pointer (&uri->stream, g_free);
-  g_clear_pointer (&uri->username, g_free);
-  g_clear_pointer (&uri->password, g_free);
-}
-
-gchar *
-gst_rtmp2_uri_get_string (GstRtmp2URI * uri, gboolean with_stream)
-{
-  GstUri *gsturi;
-  gchar *string;
-
-  gsturi = gst_uri_new ("rtmp", NULL, uri->host,
-      uri->port == DEFAULT_PORT ? GST_URI_NO_PORT : uri->port, "/", NULL, NULL);
-
-  gst_uri_append_path_segment (gsturi, uri->application);
-
-  if (with_stream) {
-    gst_uri_append_path_segment (gsturi, uri->stream);
-  }
-
-  string = gst_uri_to_string (gsturi);
-  gst_uri_unref (gsturi);
-
-  return string;
 }

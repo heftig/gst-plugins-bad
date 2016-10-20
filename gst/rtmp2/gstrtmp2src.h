@@ -18,9 +18,10 @@
  */
 
 #ifndef _GST_RTMP2_SRC_H_
+
 #define _GST_RTMP2_SRC_H_
 
-#include "gstrtmp2urihandler.h"
+#include "gstrtmp2locationhandler.h"
 
 #include <gst/base/gstpushsrc.h>
 #include <rtmp/rtmpclient.h>
@@ -40,22 +41,20 @@ struct _GstRtmp2Src
   GstPushSrc base_rtmp2src;
 
   /* properties */
-  GstRtmp2URI uri;
-  gchar *secure_token;
+  GstRtmpLocation location;
 
   /* stuff */
   gboolean sent_header;
   GMutex lock;
   GCond cond;
   GQueue *queue;
-  gboolean reset;
+  gboolean flushing;
   GstTask *task;
   GRecMutex task_lock;
   GMainLoop *task_main_loop;
 
-  GstRtmpClient *client;
+  GTask *connect_task;
   GstRtmpConnection *connection;
-  gboolean dump;
 };
 
 struct _GstRtmp2SrcClass
