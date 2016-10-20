@@ -347,14 +347,21 @@ gst_amf_object_set_number (GstAmfNode * node, const char *field_name,
 }
 
 void
-gst_amf_object_set_string (GstAmfNode * node, const char *field_name,
-    const char *s)
+gst_amf_object_set_string_take (GstAmfNode * node, const char *field_name,
+    char *s)
 {
   GstAmfNode *child_node;
 
   child_node = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (child_node, s);
+  gst_amf_node_set_string_take (child_node, s);
   gst_amf_object_append_take (node, field_name, child_node);
+}
+
+void
+gst_amf_object_set_string (GstAmfNode * node, const char *field_name,
+    const char *s)
+{
+  gst_amf_object_set_string_take (node, field_name, g_strdup (s));
 }
 
 
