@@ -354,9 +354,10 @@ gst_rtmp2_sink_stop (GstBaseSink * sink)
   if (rtmp2sink->connect_task) {
     g_cancellable_cancel (g_task_get_cancellable (rtmp2sink->connect_task));
   }
-
   gst_task_stop (rtmp2sink->task);
-  g_main_loop_quit (rtmp2sink->task_main_loop);
+  if (rtmp2sink->task_main_loop) {
+    g_main_loop_quit (rtmp2sink->task_main_loop);
+  }
   g_mutex_unlock (&rtmp2sink->lock);
 
   gst_task_join (rtmp2sink->task);
@@ -476,9 +477,17 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
     g_bytes_unref (bytes);
   }
 
-  gst_rtmp_connection_queue_chunk (rtmp2sink->connection, chunk);
-
-  return GST_FLOW_OK;
+  g_mutex_lock (&rtmp2sink->lock);
+  if (rtmp2sink->connection) {
+    gst_rtmp_connection_queue_chunk (rtmp2sink->connection, chunk);
+    g_mutex_unlock (&rtmp2sink->lock);
+    return GST_FLOW_OK;
+  } else {
+    g_mutex_unlock (&rtmp2sink->lock);
+    g_object_unref (chunk);
+    GST_DEBUG_OBJECT (rtmp2sink, "connection missing");
+    return GST_FLOW_ERROR;
+  }
 }
 
 /* Mainloop task */
@@ -529,6 +538,21 @@ new_connect (GstRtmp2Sink * rtmp2sink)
 }
 
 static void
+connection_closed (GstRtmpConnection * connection, GstRtmp2Sink * rtmp2sink)
+{
+  g_mutex_lock (&rtmp2sink->lock);
+  if (rtmp2sink->connect_task) {
+    g_cancellable_cancel (g_task_get_cancellable (rtmp2sink->connect_task));
+  } else if (rtmp2sink->task_main_loop) {
+    GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, WRITE,
+        ("Connection got closed"), (NULL));
+    gst_task_stop (rtmp2sink->task);
+    g_main_loop_quit (rtmp2sink->task_main_loop);
+  }
+  g_mutex_unlock (&rtmp2sink->lock);
+}
+
+static void
 connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
 {
   GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (object);
@@ -542,7 +566,10 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
 
   rtmp2sink->connect_task = NULL;
   rtmp2sink->connection = g_task_propagate_pointer (task, &error);
-  if (!rtmp2sink->connection) {
+  if (rtmp2sink->connection) {
+    g_signal_connect_object (rtmp2sink->connection, "closed",
+        G_CALLBACK (connection_closed), rtmp2sink, 0);
+  } else {
     if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
       GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, NOT_AUTHORIZED,
           ("Not authorized to push to server"),

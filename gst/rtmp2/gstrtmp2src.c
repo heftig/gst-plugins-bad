@@ -350,9 +350,10 @@ gst_rtmp2_src_stop (GstBaseSrc * src)
   if (rtmp2src->connect_task) {
     g_cancellable_cancel (g_task_get_cancellable (rtmp2src->connect_task));
   }
-
   gst_task_stop (rtmp2src->task);
-  g_main_loop_quit (rtmp2src->task_main_loop);
+  if (rtmp2src->task_main_loop) {
+    g_main_loop_quit (rtmp2src->task_main_loop);
+  }
   g_mutex_unlock (&rtmp2src->lock);
 
   gst_task_join (rtmp2src->task);
@@ -422,6 +423,10 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
   g_mutex_lock (&rtmp2src->lock);
   chunk = g_queue_pop_head (rtmp2src->queue);
   while (!chunk) {
+    if (!rtmp2src->task_main_loop) {
+      g_mutex_unlock (&rtmp2src->lock);
+      return GST_FLOW_EOS;
+    }
     if (rtmp2src->flushing) {
       g_mutex_unlock (&rtmp2src->lock);
       return GST_FLOW_FLUSHING;
@@ -525,6 +530,20 @@ got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 }
 
 static void
+connection_closed (GstRtmpConnection * connection, GstRtmp2Src * rtmp2src)
+{
+  g_mutex_lock (&rtmp2src->lock);
+  if (rtmp2src->connect_task) {
+    g_cancellable_cancel (g_task_get_cancellable (rtmp2src->connect_task));
+  } else if (rtmp2src->task_main_loop) {
+    GST_INFO_OBJECT (rtmp2src, "Connection got closed");
+    gst_task_stop (rtmp2src->task);
+    g_main_loop_quit (rtmp2src->task_main_loop);
+  }
+  g_mutex_unlock (&rtmp2src->lock);
+}
+
+static void
 connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
 {
   GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (object);
@@ -541,6 +560,8 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
   if (rtmp2src->connection) {
     g_signal_connect_object (rtmp2src->connection, "got-chunk",
         G_CALLBACK (got_chunk), rtmp2src, 0);
+    g_signal_connect_object (rtmp2src->connection, "closed",
+        G_CALLBACK (connection_closed), rtmp2src, 0);
   } else {
     if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
       GST_ELEMENT_ERROR (rtmp2src, RESOURCE, NOT_AUTHORIZED,
