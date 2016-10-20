@@ -80,6 +80,8 @@ const GstAmfNode *gst_amf_node_get_object_by_index (const GstAmfNode *node, int 
 
 void gst_amf_object_set_number (GstAmfNode *node, const char *field_name,
     double val);
+void gst_amf_object_set_string_take (GstAmfNode *node, const char *field_name,
+    char *s);
 void gst_amf_object_set_string (GstAmfNode *node, const char *field_name,
     const char *s);
 
