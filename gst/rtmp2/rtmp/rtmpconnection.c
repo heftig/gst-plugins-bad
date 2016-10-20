@@ -452,7 +452,11 @@ gst_rtmp_connection_write_chunk_done (GObject * obj,
 
   ret = g_output_stream_write_finish (os, res, &error);
   if (ret < 0) {
-    GST_ERROR ("write error: %s", error->message);
+    if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+      GST_INFO ("write cancelled");
+    } else {
+      GST_ERROR ("write error: %s", error->message);
+    }
     gst_rtmp_connection_got_closed (connection);
     g_error_free (error);
   } else if (ret < expected_size) {
