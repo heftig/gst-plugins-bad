@@ -496,20 +496,25 @@ gst_rtmp2_sink_task (gpointer user_data)
 {
   GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (user_data);
   GMainContext *main_context;
+  GMainLoop *main_loop;
 
   GST_DEBUG ("gst_rtmp2_sink_task starting");
 
   main_context = g_main_context_new ();
   g_main_context_push_thread_default (main_context);
 
-  rtmp2sink->task_main_loop = g_main_loop_new (main_context, TRUE);
-
+  g_mutex_lock (&rtmp2sink->lock);
+  main_loop = rtmp2sink->task_main_loop = g_main_loop_new (main_context, TRUE);
   new_connect (rtmp2sink);
+  g_mutex_unlock (&rtmp2sink->lock);
 
-  g_main_loop_run (rtmp2sink->task_main_loop);
+  g_main_loop_run (main_loop);
+
+  g_mutex_lock (&rtmp2sink->lock);
   g_clear_pointer (&rtmp2sink->task_main_loop, g_main_loop_unref);
-
   g_clear_pointer (&rtmp2sink->connection, gst_rtmp_connection_close_and_unref);
+  g_cond_signal (&rtmp2sink->cond);
+  g_mutex_unlock (&rtmp2sink->lock);
 
   while (g_main_context_pending (main_context)) {
     GST_DEBUG ("iterating main context to clean up");
