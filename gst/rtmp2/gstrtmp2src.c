@@ -458,20 +458,25 @@ gst_rtmp2_src_task (gpointer user_data)
 {
   GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (user_data);
   GMainContext *main_context;
+  GMainLoop *main_loop;
 
   GST_DEBUG ("gst_rtmp2_src_task starting");
 
   main_context = g_main_context_new ();
   g_main_context_push_thread_default (main_context);
 
-  rtmp2src->task_main_loop = g_main_loop_new (main_context, TRUE);
-
+  g_mutex_lock (&rtmp2src->lock);
+  main_loop = rtmp2src->task_main_loop = g_main_loop_new (main_context, TRUE);
   new_connect (rtmp2src);
+  g_mutex_unlock (&rtmp2src->lock);
 
-  g_main_loop_run (rtmp2src->task_main_loop);
+  g_main_loop_run (main_loop);
+
+  g_mutex_lock (&rtmp2src->lock);
   g_clear_pointer (&rtmp2src->task_main_loop, g_main_loop_unref);
-
   g_clear_pointer (&rtmp2src->connection, gst_rtmp_connection_close_and_unref);
+  g_cond_signal (&rtmp2src->cond);
+  g_mutex_unlock (&rtmp2src->lock);
 
   while (g_main_context_pending (main_context)) {
     GST_DEBUG ("iterating main context to clean up");
