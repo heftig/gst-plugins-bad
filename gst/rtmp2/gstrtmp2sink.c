@@ -636,6 +636,11 @@ create_stream_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
   GST_DEBUG_OBJECT (rtmp2sink, "createStream success, stream_id=%.0f",
       gst_amf_node_get_number (optional_args));
 
+  if (g_task_return_error_if_cancelled (task)) {
+    g_object_unref (task);
+    return;
+  }
+
   send_publish (task);
 }
 
