@@ -25,225 +25,186 @@
 #include <gio/gio.h>
 #include <string.h>
 #include "rtmpclient.h"
+#include "rtmputils.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_client_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_client_debug_category
 
-/* prototypes */
-
-static void gst_rtmp_client_set_property (GObject * object,
-    guint property_id, const GValue * value, GParamSpec * pspec);
-static void gst_rtmp_client_get_property (GObject * object,
-    guint property_id, GValue * value, GParamSpec * pspec);
-static void gst_rtmp_client_dispose (GObject * object);
-static void gst_rtmp_client_finalize (GObject * object);
-
-static void
-gst_rtmp_client_connect_done (GObject * source, GAsyncResult * result,
+static void socket_connect (GTask * task);
+static void socket_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
+static gchar *do_adobe_auth (const gchar * username, const gchar * password,
+    const gchar * salt, const gchar * opaque, const gchar * challenge);
+static void send_connect (GTask * task, GstRtmpConnection * connection);
+static void send_connect_done (GstRtmpConnection * connection,
+    GstRtmpChunk * chunk, const char *command_name, int transaction_id,
+    GstAmfNode * command_object, GstAmfNode * optional_args,
+    gpointer user_data);
+static void send_secure_token_response (GTask * task,
+    GstRtmpConnection * connection, const gchar * challenge);
 
-enum
+void
+gst_rtmp_location_copy (GstRtmpLocation * dest, const GstRtmpLocation * src)
 {
-  PROP_0,
-  PROP_SERVER_ADDRESS,
-  PROP_SERVER_PORT,
-  PROP_TIMEOUT
-};
+  g_return_if_fail (dest);
+  g_return_if_fail (src);
 
-#define DEFAULT_SERVER_ADDRESS ""
-#define DEFAULT_SERVER_PORT 1935
+  dest->host = g_strdup (src->host);
+  dest->port = src->port;
+  dest->application = g_strdup (src->application);
+  dest->stream = g_strdup (src->stream);
+  dest->username = g_strdup (src->username);
+  dest->password = g_strdup (src->password);
+  dest->secure_token = g_strdup (src->secure_token);
+  dest->authmod = src->authmod;
+  dest->timeout = src->timeout;
+}
+
+void
+gst_rtmp_location_clear (GstRtmpLocation * location)
+{
+  g_return_if_fail (location);
+
+  g_clear_pointer (&location->host, g_free);
+  location->port = 0;
+  g_clear_pointer (&location->application, g_free);
+  g_clear_pointer (&location->stream, g_free);
+  g_clear_pointer (&location->username, g_free);
+  g_clear_pointer (&location->password, g_free);
+  g_clear_pointer (&location->secure_token, g_free);
+}
+
+gchar *
+gst_rtmp_location_get_string (const GstRtmpLocation * uri, gboolean with_stream)
+{
+  GstUri *gsturi;
+  gchar *string;
+
+  gsturi = gst_uri_new ("rtmp", NULL, uri->host,
+      uri->port == GST_RTMP_DEFAULT_PORT ? GST_URI_NO_PORT : uri->port, "/",
+      NULL, NULL);
+
+  gst_uri_append_path_segment (gsturi, uri->application);
+
+  if (with_stream) {
+    gst_uri_append_path_segment (gsturi, uri->stream);
+  }
+
+  string = gst_uri_to_string (gsturi);
+  gst_uri_unref (gsturi);
+
+  return string;
+}
+
 #define DEFAULT_TIMEOUT 5
 
-/* pad templates */
-
-
-/* class initialization */
-
-G_DEFINE_TYPE_WITH_CODE (GstRtmpClient, gst_rtmp_client, G_TYPE_OBJECT,
-    GST_DEBUG_CATEGORY_INIT (gst_rtmp_client_debug_category, "rtmpclient", 0,
-        "debug category for GstRtmpClient class"));
-
-static void
-gst_rtmp_client_class_init (GstRtmpClientClass * klass)
+typedef struct
 {
-  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+  GstRtmpLocation location;
+  gchar *auth_query;
+} TaskData;
 
-  gobject_class->set_property = gst_rtmp_client_set_property;
-  gobject_class->get_property = gst_rtmp_client_get_property;
-  gobject_class->dispose = gst_rtmp_client_dispose;
-  gobject_class->finalize = gst_rtmp_client_finalize;
-
-  g_object_class_install_property (gobject_class, PROP_SERVER_ADDRESS,
-      g_param_spec_string ("server-address", "RTMP Server Address",
-          "Address of RTMP server",
-          DEFAULT_SERVER_ADDRESS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (gobject_class, PROP_SERVER_PORT,
-      g_param_spec_int ("port", "RTMP server port",
-          "RTMP server port (usually 1935)",
-          1, 65535, DEFAULT_SERVER_PORT,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-  g_object_class_install_property (gobject_class, PROP_TIMEOUT,
-      g_param_spec_int ("timeout", "Socket timeout",
-          "Socket timeout, in seconds", 0, 1000, DEFAULT_TIMEOUT,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
+static TaskData *
+task_data_new (const GstRtmpLocation * location)
+{
+  TaskData *data = g_slice_new (TaskData);
+  gst_rtmp_location_copy (&data->location, location);
+  return data;
 }
 
 static void
-gst_rtmp_client_init (GstRtmpClient * rtmpclient)
+task_data_free (gpointer ptr)
 {
-  rtmpclient->server_address = g_strdup (DEFAULT_SERVER_ADDRESS);
-  rtmpclient->server_port = DEFAULT_SERVER_PORT;
-
-  rtmpclient->connection = gst_rtmp_connection_new ();
+  TaskData *data = ptr;
+  gst_rtmp_location_clear (&data->location);
+  g_clear_pointer (&data->auth_query, g_free);
+  g_slice_free (TaskData, data);
 }
 
-void
-gst_rtmp_client_set_property (GObject * object, guint property_id,
-    const GValue * value, GParamSpec * pspec)
+static GRegex *auth_regex = NULL;
+
+GType
+gst_rtmp_authmod_get_type (void)
 {
-  GstRtmpClient *rtmpclient = GST_RTMP_CLIENT (object);
+  static volatile gsize authmod_type = 0;
+  static const GEnumValue authmod[] = {
+    {GST_RTMP_AUTHMOD_NONE, "GST_RTMP_AUTHMOD_NONE", "none"},
+    {GST_RTMP_AUTHMOD_AUTO, "GST_RTMP_AUTHMOD_AUTO", "auto"},
+    {GST_RTMP_AUTHMOD_ADOBE, "GST_RTMP_AUTHMOD_ADOBE", "adobe"},
+    {0, NULL, NULL},
+  };
 
-  GST_DEBUG_OBJECT (rtmpclient, "set_property");
-
-  switch (property_id) {
-    case PROP_SERVER_ADDRESS:
-      gst_rtmp_client_set_server_address (rtmpclient,
-          g_value_get_string (value));
-      break;
-    case PROP_SERVER_PORT:
-      gst_rtmp_client_set_server_port (rtmpclient, g_value_get_int (value));
-      break;
-    case PROP_TIMEOUT:
-      rtmpclient->timeout = g_value_get_int (value);
-      break;
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
-      break;
+  if (g_once_init_enter (&authmod_type)) {
+    GType tmp = g_enum_register_static ("GstRtmpAuthmod", authmod);
+    g_once_init_leave (&authmod_type, tmp);
   }
+
+  return (GType) authmod_type;
 }
 
 void
-gst_rtmp_client_get_property (GObject * object, guint property_id,
-    GValue * value, GParamSpec * pspec)
-{
-  GstRtmpClient *rtmpclient = GST_RTMP_CLIENT (object);
-
-  GST_DEBUG_OBJECT (rtmpclient, "get_property");
-
-  switch (property_id) {
-    case PROP_SERVER_ADDRESS:
-      g_value_set_string (value, rtmpclient->server_address);
-      break;
-    case PROP_SERVER_PORT:
-      g_value_set_int (value, rtmpclient->server_port);
-      break;
-    case PROP_TIMEOUT:
-      g_value_set_int (value, rtmpclient->timeout);
-      break;
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
-      break;
-  }
-}
-
-void
-gst_rtmp_client_dispose (GObject * object)
-{
-  GstRtmpClient *rtmpclient = GST_RTMP_CLIENT (object);
-
-  GST_DEBUG_OBJECT (rtmpclient, "dispose");
-
-  /* clean up as possible.  may be called multiple times */
-
-  G_OBJECT_CLASS (gst_rtmp_client_parent_class)->dispose (object);
-}
-
-void
-gst_rtmp_client_finalize (GObject * object)
-{
-  GstRtmpClient *rtmpclient = GST_RTMP_CLIENT (object);
-
-  GST_DEBUG_OBJECT (rtmpclient, "finalize");
-
-  /* clean up object here */
-  g_free (rtmpclient->server_address);
-  g_free (rtmpclient->stream);
-  g_clear_object (&rtmpclient->connection);
-
-  G_OBJECT_CLASS (gst_rtmp_client_parent_class)->finalize (object);
-}
-
-/* API */
-
-GstRtmpClient *
-gst_rtmp_client_new (void)
-{
-
-  return g_object_new (GST_TYPE_RTMP_CLIENT, NULL);
-
-}
-
-void
-gst_rtmp_client_set_server_address (GstRtmpClient * client,
-    const char *server_address)
-{
-  g_free (client->server_address);
-  client->server_address = g_strdup (server_address);
-}
-
-void
-gst_rtmp_client_set_server_port (GstRtmpClient * client, int port)
-{
-  client->server_port = port;
-}
-
-void
-gst_rtmp_client_set_stream (GstRtmpClient * client, const char *stream)
-{
-  g_free (client->stream);
-  client->stream = g_strdup (stream);
-}
-
-void
-gst_rtmp_client_connect_async (GstRtmpClient * client,
+gst_rtmp_client_connect_async (const GstRtmpLocation * location,
     GCancellable * cancellable, GAsyncReadyCallback callback,
     gpointer user_data)
 {
-  GSocketClient *socket_client;
   GTask *task;
-  GSocketConnectable *addr;
 
-  task = g_task_new (client, cancellable, callback, user_data);
+  if (g_once_init_enter (&auth_regex)) {
+    GRegex *re = g_regex_new ("\\[ *AccessManager.Reject *\\] *: *"
+        "\\[ *authmod=adobe *\\] *: *"
+        "\\?reason=needauth"
+        "&user=(?<user>.*?)"
+        "&salt=(?<salt>.*?)"
+        "&challenge=(?<challenge>.*?)"
+        "&opaque=(?<opaque>.*?)\\Z", G_REGEX_DOTALL, 0, NULL);
+    g_warn_if_fail (re);
 
-  if (client->state != GST_RTMP_CLIENT_STATE_NEW) {
-    g_task_return_new_error (task, GST_RTMP_ERROR,
-        GST_RTMP_ERROR_TOO_LAZY, "already connected");
-    g_object_unref (task);
-    return;
+    GST_DEBUG_CATEGORY_INIT (gst_rtmp_client_debug_category,
+        "rtmpclient", 0, "debug category for rtmpclient");
+
+    g_once_init_leave (&auth_regex, re);
   }
 
-  addr = g_network_address_new (client->server_address, client->server_port);
+  task = g_task_new (NULL, cancellable, callback, user_data);
+
+  g_task_set_task_data (task, task_data_new (location), task_data_free);
+
+  socket_connect (task);
+}
+
+static void
+socket_connect (GTask * task)
+{
+  TaskData *data = g_task_get_task_data (task);
+  GSocketConnectable *addr;
+  GSocketClient *socket_client;
+
+  if (data->location.timeout < 0) {
+    data->location.timeout = DEFAULT_TIMEOUT;
+  }
+
+  addr = g_network_address_new (data->location.host, data->location.port);
   socket_client = g_socket_client_new ();
-  g_socket_client_set_timeout (socket_client, client->timeout);
+  g_socket_client_set_timeout (socket_client, data->location.timeout);
 
   GST_DEBUG ("g_socket_client_connect_async");
-  g_socket_client_connect_async (socket_client, addr, cancellable,
-      gst_rtmp_client_connect_done, task);
+  g_socket_client_connect_async (socket_client, addr,
+      g_task_get_cancellable (task), socket_connect_done, task);
   g_object_unref (addr);
 }
 
 static void
-gst_rtmp_client_connect_done (GObject * source, GAsyncResult * result,
+socket_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data)
 {
   GSocketClient *socket_client = G_SOCKET_CLIENT (source);
   GTask *task = user_data;
-  GstRtmpClient *client = g_task_get_source_object (task);
   GError *error = NULL;
+  GSocketConnection *socket_connection;
+  GstRtmpConnection *rtmp_connection;
 
   GST_DEBUG ("g_socket_client_connect_done");
-  client->socket_connection =
+  socket_connection =
       g_socket_client_connect_finish (socket_client, result, &error);
   g_object_unref (socket_client);
 
@@ -253,32 +214,291 @@ gst_rtmp_client_connect_done (GObject * source, GAsyncResult * result,
     return;
   }
 
-  if (client->socket_connection == NULL) {
+  if (socket_connection == NULL) {
     GST_ERROR ("error");
     g_task_return_error (task, error);
     g_object_unref (task);
     return;
   }
 
-  gst_rtmp_connection_set_socket_connection (client->connection,
-      client->socket_connection);
-  gst_rtmp_connection_start_handshake (client->connection, FALSE);
+  rtmp_connection = gst_rtmp_connection_new ();
 
-  g_task_return_boolean (task, TRUE);
+  gst_rtmp_connection_set_socket_connection (rtmp_connection,
+      socket_connection);
+  gst_rtmp_connection_start_handshake (rtmp_connection, FALSE);
+
+  send_connect (task, rtmp_connection);
+  g_object_unref (rtmp_connection);
+}
+
+static gchar *
+do_adobe_auth (const gchar * username, const gchar * password,
+    const gchar * salt, const gchar * opaque, const gchar * challenge)
+{
+  guint8 hash[16];              /* MD5 digest */
+  gsize hashlen = sizeof hash;
+  gchar *challenge2, *auth_query;
+  GChecksum *md5;
+
+  md5 = g_checksum_new (G_CHECKSUM_MD5);
+  g_checksum_update (md5, (guchar *) username, -1);
+  g_checksum_update (md5, (guchar *) salt, -1);
+  g_checksum_update (md5, (guchar *) password, -1);
+
+  g_checksum_get_digest (md5, hash, &hashlen);
+  g_warn_if_fail (hashlen == sizeof hash);
+
+  {
+    gchar *hashstr = g_base64_encode ((guchar *) hash, sizeof hash);
+    g_checksum_reset (md5);
+    g_checksum_update (md5, (guchar *) hashstr, -1);
+    g_free (hashstr);
+  }
+
+  if (opaque)
+    g_checksum_update (md5, (guchar *) opaque, -1);
+  else if (challenge)
+    g_checksum_update (md5, (guchar *) challenge, -1);
+
+  challenge2 = g_strdup_printf ("%08x", g_random_int ());
+  g_checksum_update (md5, (guchar *) challenge2, -1);
+
+  g_checksum_get_digest (md5, hash, &hashlen);
+  g_warn_if_fail (hashlen == sizeof hash);
+
+  {
+    gchar *hashstr = g_base64_encode ((guchar *) hash, sizeof hash);
+
+    if (opaque) {
+      auth_query =
+          g_strdup_printf
+          ("authmod=%s&user=%s&challenge=%s&response=%s&opaque=%s", "adobe",
+          username, challenge2, hashstr, opaque);
+    } else {
+      auth_query =
+          g_strdup_printf ("authmod=%s&user=%s&challenge=%s&response=%s",
+          "adobe", username, challenge2, hashstr);
+    }
+    g_free (hashstr);
+  }
+
+  g_checksum_free (md5);
+  g_free (challenge2);
+
+  return auth_query;
+}
+
+static void
+send_connect (GTask * task, GstRtmpConnection * connection)
+{
+  TaskData *data = g_task_get_task_data (task);
+  GstAmfNode *node;
+  const gchar *app;
+  gchar *uri, *appstr = NULL, *uristr = NULL;
+
+  node = gst_amf_node_new (GST_AMF_TYPE_OBJECT);
+  app = data->location.application;
+  uri = gst_rtmp_location_get_string (&data->location, FALSE);
+
+  if (data->auth_query) {
+    const gchar *query = data->auth_query;
+    appstr = g_strdup_printf ("%s?%s", app, query);
+    uristr = g_strdup_printf ("%s?%s", uri, query);
+  } else if (data->location.authmod == GST_RTMP_AUTHMOD_ADOBE) {
+    const gchar *user = data->location.username;
+    const gchar *authmod = "adobe";
+    appstr = g_strdup_printf ("%s?authmod=%s&user=%s", app, authmod, user);
+    uristr = g_strdup_printf ("%s?authmod=%s&user=%s", uri, authmod, user);
+  } else {
+    appstr = g_strdup (app);
+    uristr = g_strdup (uri);
+  }
+
+  gst_amf_object_set_string_take (node, "app", appstr);
+  gst_amf_object_set_string_take (node, "tcUrl", uristr);
+  gst_amf_object_set_string (node, "type", "nonprivate");
+  gst_amf_object_set_string (node, "flashVer", "FMLE/3.0");
+
+  // "fpad": False,
+  // "capabilities": 15,
+  // "audioCodecs": 3191,
+  // "videoCodecs": 252,
+  // "videoFunction": 1,
+
+  gst_rtmp_connection_send_command (connection, 3, "connect", 1,
+      node, NULL, send_connect_done, task);
+
+  gst_amf_node_free (node);
+  g_free (uri);
+}
+
+static void
+send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
+    const char *command_name, int transaction_id, GstAmfNode * command_object,
+    GstAmfNode * optional_args, gpointer user_data)
+{
+  GTask *task = G_TASK (user_data);
+  TaskData *data = g_task_get_task_data (task);
+  const GstAmfNode *node;
+  const gchar *code;
+
+  if (!optional_args) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "arguments missing from connect cmd result");
+    g_object_unref (task);
+    return;
+  }
+
+  node = gst_amf_node_get_object (optional_args, "code");
+  if (!node) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "result code missing from connect cmd result");
+    g_object_unref (task);
+    return;
+  }
+
+  code = gst_amf_node_get_string (node);
+  GST_INFO ("connect result: %s", GST_STR_NULL (code));
+
+  if (g_str_equal (code, "NetConnection.Connect.Success")) {
+    node = gst_amf_node_get_object (optional_args, "secureToken");
+    send_secure_token_response (task, connection,
+        node ? gst_amf_node_get_string (node) : NULL);
+    return;
+  }
+
+  if (g_str_equal (code, "NetConnection.Connect.Rejected")) {
+    GMatchInfo *match_info;
+    const gchar *desc;
+
+    node = gst_amf_node_get_object (optional_args, "description");
+    if (!node) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+          "Connect rejected; no description");
+      g_object_unref (task);
+      return;
+    }
+
+    desc = gst_amf_node_get_string (node);
+    GST_DEBUG ("connect result desc: %s", GST_STR_NULL (desc));
+
+    if (g_strrstr (desc, "code=403 need auth; authmod=adobe")) {
+      GST_INFO ("server requires adobe style auth mode");
+
+      if (!(data->location.authmod == GST_RTMP_AUTHMOD_AUTO ||
+              data->location.authmod == GST_RTMP_AUTHMOD_ADOBE)) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "adobe style auth required, but incompatible auth mode selected");
+        g_object_unref (task);
+        return;
+      }
+      if (!data->location.username || !data->location.username[0] ||
+          !data->location.password || !data->location.password[0]) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "adobe style auth required, but no credentials supplied");
+        g_object_unref (task);
+        return;
+      }
+
+      data->location.authmod = GST_RTMP_AUTHMOD_ADOBE;
+      gst_rtmp_connection_close (connection);
+      socket_connect (task);
+      return;
+    }
+
+    if (g_strrstr (desc, "?reason=authfailed")) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+          "authentication failed! wrong credentials?");
+      g_object_unref (task);
+      return;
+    }
+
+    if (g_regex_match (auth_regex, desc, 0, &match_info)) {
+      const gchar *username = data->location.username;
+      const gchar *password = data->location.password;
+      gchar *salt = g_match_info_fetch_named (match_info, "salt");
+      gchar *challenge = g_match_info_fetch_named (match_info, "challenge");
+      gchar *opaque = g_match_info_fetch_named (match_info, "opaque");
+
+      g_match_info_free (match_info);
+
+      GST_INFO
+          ("regex parsed auth... user='%s', salt='%s', challenge='%s', opaque='%s'",
+          GST_STR_NULL (data->location.username), GST_STR_NULL (salt),
+          GST_STR_NULL (challenge), GST_STR_NULL (opaque));
+
+      g_warn_if_fail (data->location.authmod == GST_RTMP_AUTHMOD_ADOBE);
+      data->location.authmod = GST_RTMP_AUTHMOD_ADOBE;
+
+      g_warn_if_fail (!data->auth_query);
+      data->auth_query =
+          do_adobe_auth (username, password, salt, opaque, challenge);
+      g_free (salt);
+      g_free (opaque);
+      g_free (challenge);
+
+      if (!data->auth_query) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+            "couldn't generate adobe style authentication query");
+        g_object_unref (task);
+        return;
+      }
+
+      gst_rtmp_connection_close (connection);
+      socket_connect (task);
+      return;
+    }
+
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+        "unhandled auth rejection: %s", GST_STR_NULL (desc));
+    g_object_unref (task);
+    return;
+  }
+
+  g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+      "unhandled connect result code: %s", GST_STR_NULL (code));
   g_object_unref (task);
 }
 
-gboolean
-gst_rtmp_client_connect_finish (GstRtmpClient * client,
-    GAsyncResult * result, GError ** error)
+static void
+send_secure_token_response (GTask * task, GstRtmpConnection * connection,
+    const gchar * challenge)
 {
-  GTask *task = G_TASK (result);
-  g_return_val_if_fail (g_task_is_valid (task, client), FALSE);
-  return g_task_propagate_boolean (task, error);
+  if (challenge) {
+    TaskData *data = g_task_get_task_data (task);
+    GstAmfNode *node1;
+    GstAmfNode *node2;
+    gchar *response;
+
+    if (!data->location.secure_token || !data->location.secure_token[0]) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+          "server requires secure token authentication");
+      g_object_unref (task);
+      return;
+    }
+
+    response = gst_rtmp_tea_decode (data->location.secure_token, challenge);
+
+    GST_DEBUG ("response: %s", response);
+
+    node1 = gst_amf_node_new (GST_AMF_TYPE_NULL);
+    node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
+    gst_amf_node_set_string_take (node2, response);
+
+    gst_rtmp_connection_send_command (connection, 3,
+        "secureTokenResponse", 0, node1, node2, NULL, NULL);
+    gst_amf_node_free (node1);
+    gst_amf_node_free (node2);
+  }
+
+  g_task_return_pointer (task, g_object_ref (connection),
+      gst_rtmp_connection_close_and_unref);
+  g_object_unref (task);
 }
 
 GstRtmpConnection *
-gst_rtmp_client_get_connection (GstRtmpClient * client)
+gst_rtmp_client_connect_finish (GAsyncResult * result, GError ** error)
 {
-  return client->connection;
+  GTask *task = G_TASK (result);
+  return g_task_propagate_pointer (task, error);
 }
