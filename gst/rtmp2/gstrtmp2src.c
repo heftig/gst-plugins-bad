@@ -516,6 +516,7 @@ got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 
   switch (chunk->message_type_id) {
     case GST_RTMP_MESSAGE_TYPE_VIDEO:
+    case GST_RTMP_MESSAGE_TYPE_AUDIO:
       break;
 
     case GST_RTMP_MESSAGE_TYPE_DATA:
