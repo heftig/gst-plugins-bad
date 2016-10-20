@@ -127,7 +127,7 @@ static void
 gst_rtmp_connection_init (GstRtmpConnection * rtmpconnection)
 {
   rtmpconnection->cancellable = g_cancellable_new ();
-  rtmpconnection->output_queue = g_async_queue_new ();
+  rtmpconnection->output_queue = g_async_queue_new_full (g_object_unref);
   rtmpconnection->input_chunk_cache = gst_rtmp_chunk_cache_new ();
   rtmpconnection->output_chunk_cache = gst_rtmp_chunk_cache_new ();
 
@@ -184,20 +184,12 @@ void
 gst_rtmp_connection_finalize (GObject * object)
 {
   GstRtmpConnection *rtmpconnection = GST_RTMP_CONNECTION (object);
-  gpointer p;
-
   GST_DEBUG_OBJECT (rtmpconnection, "finalize");
 
   /* clean up object here */
 
   g_clear_object (&rtmpconnection->cancellable);
   g_clear_object (&rtmpconnection->connection);
-
-  p = g_async_queue_try_pop (rtmpconnection->output_queue);
-  while (p) {
-    g_object_unref (p);
-    p = g_async_queue_try_pop (rtmpconnection->output_queue);
-  }
   g_async_queue_unref (rtmpconnection->output_queue);
   gst_rtmp_chunk_cache_free (rtmpconnection->input_chunk_cache);
   gst_rtmp_chunk_cache_free (rtmpconnection->output_chunk_cache);
