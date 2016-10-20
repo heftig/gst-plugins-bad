@@ -98,6 +98,7 @@ GstRtmpConnection *gst_rtmp_connection_new (void);
 void gst_rtmp_connection_set_socket_connection (
     GstRtmpConnection *rtmpconnection, GSocketConnection *connection);
 void gst_rtmp_connection_close (GstRtmpConnection *connection);
+void gst_rtmp_connection_close_and_unref (gpointer ptr);
 
 void gst_rtmp_connection_start_handshake (GstRtmpConnection *connection,
     gboolean is_server);
