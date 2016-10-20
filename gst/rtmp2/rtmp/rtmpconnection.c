@@ -258,6 +258,18 @@ gst_rtmp_connection_close (GstRtmpConnection * connection)
 
 }
 
+void
+gst_rtmp_connection_close_and_unref (gpointer ptr)
+{
+  GstRtmpConnection *connection;
+
+  g_return_if_fail (ptr);
+
+  connection = GST_RTMP_CONNECTION (ptr);
+  gst_rtmp_connection_close (connection);
+  g_object_unref (connection);
+}
+
 static gboolean
 start_output (gpointer user_priv)
 {
