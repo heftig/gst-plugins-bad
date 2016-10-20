@@ -190,9 +190,11 @@ gst_rtmp_connection_finalize (GObject * object)
 
   g_clear_object (&rtmpconnection->cancellable);
   g_clear_object (&rtmpconnection->connection);
-  g_async_queue_unref (rtmpconnection->output_queue);
-  gst_rtmp_chunk_cache_free (rtmpconnection->input_chunk_cache);
-  gst_rtmp_chunk_cache_free (rtmpconnection->output_chunk_cache);
+  g_clear_pointer (&rtmpconnection->output_queue, g_async_queue_unref);
+  g_clear_pointer (&rtmpconnection->input_chunk_cache,
+      gst_rtmp_chunk_cache_free);
+  g_clear_pointer (&rtmpconnection->output_chunk_cache,
+      gst_rtmp_chunk_cache_free);
 
   G_OBJECT_CLASS (gst_rtmp_connection_parent_class)->finalize (object);
 }
