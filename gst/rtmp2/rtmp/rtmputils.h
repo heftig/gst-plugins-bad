@@ -25,6 +25,8 @@
 
 G_BEGIN_DECLS
 
+#define GST_RTMP_DEFAULT_PORT 1935
+
 void gst_rtmp_dump_data (GBytes * bytes);
 GBytes *gst_rtmp_bytes_append (GBytes *bytes, guint8 *data, gsize size);
 GBytes *gst_rtmp_bytes_remove (GBytes *bytes, gsize size);
