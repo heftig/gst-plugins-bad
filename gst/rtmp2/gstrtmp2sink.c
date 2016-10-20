@@ -67,12 +67,7 @@ static GstFlowReturn gst_rtmp2_sink_render (GstBaseSink * sink,
 
 /* Internal API */
 static void gst_rtmp2_sink_task (gpointer user_data);
-static void connect_done (GObject * source, GAsyncResult * result,
-    gpointer user_data);
-static void send_connect (GTask * task);
-static void cmd_connect_done (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk, const char *command_name, int transaction_id,
-    GstAmfNode * command_object, GstAmfNode * optional_args,
+static void client_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
 static void send_create_stream (GTask * task);
 static void create_stream_done (GstRtmpConnection * connection,
@@ -84,52 +79,10 @@ static void publish_done (GstRtmpConnection * connection,
     GstRtmpChunk * chunk, const char *command_name, int transaction_id,
     GstAmfNode * command_object, GstAmfNode * optional_args,
     gpointer user_data);
-static void send_secure_token_response (GTask * task, const char *challenge);
+static void new_connect (GstRtmp2Sink * rtmp2sink);
+static void connect_task_done (GObject * object, GAsyncResult * result,
+    gpointer user_data);
 
-typedef struct
-{
-  GstRtmp2URI uri;
-  GstRtmpConnection *connection;
-  GstRtmpAuthmod authmod;       /* current state */
-  gchar *auth_query;
-} GstRtmpConnectData;
-
-static GstRtmpConnectData *
-gst_rtmp_connect_data_new (GstRtmp2URI * uri)
-{
-  GstRtmpConnectData *data;
-
-  g_return_val_if_fail (uri, NULL);
-
-  data = g_slice_new0 (GstRtmpConnectData);
-  gst_rtmp2_uri_copy (&data->uri, uri);
-  return data;
-}
-
-static void
-rtmp_connection_close_and_unref (gpointer ptr)
-{
-  GstRtmpConnection *connection;
-
-  g_return_if_fail (ptr);
-
-  connection = GST_RTMP_CONNECTION (ptr);
-  gst_rtmp_connection_close (connection);
-  g_object_unref (connection);
-}
-
-static void
-gst_rtmp_connect_data_free (gpointer ptr)
-{
-  GstRtmpConnectData *data = ptr;
-
-  g_return_if_fail (data);
-
-  g_clear_pointer (&data->connection, rtmp_connection_close_and_unref);
-  gst_rtmp2_uri_clear (&data->uri);
-  g_free (data->auth_query);
-  g_slice_free (GstRtmpConnectData, data);
-}
 
 enum
 {
@@ -142,13 +95,11 @@ enum
   PROP_SECURE_TOKEN,
   PROP_USERNAME,
   PROP_PASSWORD,
-  PROP_AUTH_METHOD
+  PROP_AUTHMOD,
+  PROP_TIMEOUT,
 };
 
-#define DEFAULT_TIMEOUT 5
 #define DEFAULT_PUBLISHING_TYPE "live"
-#define DEFAULT_SECURE_TOKEN ""
-#define DEFAULT_AUTH_METHOD  GST_RTMP_AUTHMOD_AUTO
 
 /* pad templates */
 
@@ -164,9 +115,8 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
     G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER,
         gst_rtmp2_sink_uri_handler_init);
-    G_IMPLEMENT_INTERFACE (GST_TYPE_RTMP2_URI_HANDLER, NULL);)
-
-     static GRegex *auth_regex;
+    G_IMPLEMENT_INTERFACE (GST_TYPE_RTMP_LOCATION_HANDLER, NULL);
+    )
 
      static void gst_rtmp2_sink_class_init (GstRtmp2SinkClass * klass)
 {
@@ -198,33 +148,15 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
   g_object_class_override_property (gobject_class, PROP_APPLICATION,
       "application");
   g_object_class_override_property (gobject_class, PROP_STREAM, "stream");
-
-  g_object_class_install_property (gobject_class, PROP_SECURE_TOKEN,
-      g_param_spec_string ("secure-token", "Secure token",
-          "Secure token used for authentication",
-          DEFAULT_SECURE_TOKEN,
-          G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
+  g_object_class_override_property (gobject_class, PROP_SECURE_TOKEN,
+      "secure-token");
   g_object_class_override_property (gobject_class, PROP_USERNAME, "username");
   g_object_class_override_property (gobject_class, PROP_PASSWORD, "password");
-
-  g_object_class_install_property (gobject_class, PROP_AUTH_METHOD,
-      g_param_spec_enum ("auth", "Auth Method",
-          "Select the authorization method",
-          GST_TYPE_RTMP2_AUTH_METHOD, DEFAULT_AUTH_METHOD,
-          G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_override_property (gobject_class, PROP_AUTHMOD, "authmod");
+  g_object_class_override_property (gobject_class, PROP_TIMEOUT, "timeout");
 
   GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
       "debug category for rtmp2sink element");
-
-  auth_regex = g_regex_new ("\\[ *AccessManager.Reject *\\] *: *"
-      "\\[ *authmod=adobe *\\] *: *"
-      "\\?reason=needauth"
-      "&user=(?<user>.*?)"
-      "&salt=(?<salt>.*?)"
-      "&challenge=(?<challenge>.*?)"
-      "&opaque=(?<opaque>.*?)\\Z", G_REGEX_DOTALL, 0, NULL);
-  g_warn_if_fail (auth_regex);
 }
 
 static void
@@ -240,25 +172,7 @@ gst_rtmp2_sink_init (GstRtmp2Sink * rtmp2sink)
 static void
 gst_rtmp2_sink_uri_handler_init (GstURIHandlerInterface * iface)
 {
-  gst_rtmp2_uri_handler_implement_uri_handler (iface, GST_URI_SINK);
-}
-
-GType
-gst_rtmp2_auth_method_get_type (void)
-{
-  static volatile gsize auth_method_type = 0;
-  static const GEnumValue auth_method[] = {
-    {GST_RTMP_AUTHMOD_NONE, "GST_RTMP_AUTHMOD_NONE", "none"},
-    {GST_RTMP_AUTHMOD_AUTO, "GST_RTMP_AUTHMOD_AUTO", "auto"},
-    {GST_RTMP_AUTHMOD_ADOBE, "GST_RTMP_AUTHMOD_ADOBE", "adobe"},
-    {0, NULL, NULL},
-  };
-
-  if (g_once_init_enter (&auth_method_type)) {
-    GType tmp = g_enum_register_static ("GstRtmpAuthmod", auth_method);
-    g_once_init_leave (&auth_method_type, tmp);
-  }
-  return (GType) auth_method_type;
+  gst_rtmp_location_handler_implement_uri_handler (iface, GST_URI_SINK);
 }
 
 void
@@ -269,66 +183,66 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
 
   switch (property_id) {
     case PROP_LOCATION:
-      gst_rtmp2_uri_handler_set_uri (GST_RTMP2_URI_HANDLER (self),
+      gst_rtmp_location_handler_set_uri (GST_RTMP_LOCATION_HANDLER (self),
           g_value_get_string (value));
       break;
     case PROP_HOST:
       GST_OBJECT_LOCK (self);
-      g_free (self->uri.host);
-      self->uri.host = g_value_dup_string (value);
+      g_free (self->location.host);
+      self->location.host = g_value_dup_string (value);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_PORT:
       GST_OBJECT_LOCK (self);
-      self->uri.port = g_value_get_int (value);
+      self->location.port = g_value_get_int (value);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_APPLICATION:
       GST_OBJECT_LOCK (self);
-      g_free (self->uri.application);
-      self->uri.application = g_value_dup_string (value);
+      g_free (self->location.application);
+      self->location.application = g_value_dup_string (value);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_STREAM:
       GST_OBJECT_LOCK (self);
-      g_free (self->uri.stream);
-      self->uri.stream = g_value_dup_string (value);
+      g_free (self->location.stream);
+      self->location.stream = g_value_dup_string (value);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_SECURE_TOKEN:
       GST_OBJECT_LOCK (self);
-      g_free (self->secure_token);
-      self->secure_token = g_value_dup_string (value);
+      g_free (self->location.secure_token);
+      self->location.secure_token = g_value_dup_string (value);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_USERNAME:
       GST_OBJECT_LOCK (self);
-      g_free (self->uri.username);
-      self->uri.username = g_value_dup_string (value);
+      g_free (self->location.username);
+      self->location.username = g_value_dup_string (value);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_PASSWORD:
       GST_OBJECT_LOCK (self);
-      g_free (self->uri.password);
-      self->uri.password = g_value_dup_string (value);
+      g_free (self->location.password);
+      self->location.password = g_value_dup_string (value);
       GST_OBJECT_UNLOCK (self);
       break;
-    case PROP_AUTH_METHOD:
+    case PROP_AUTHMOD:
     {
       GstRtmpAuthmod mode = g_value_get_enum (value);
-      GEnumValue *val =
-          g_enum_get_value (G_ENUM_CLASS (g_type_class_ref
-              (GST_TYPE_RTMP2_AUTH_METHOD)), mode);
-      const gchar *value_nick = val->value_nick;
       GST_OBJECT_LOCK (self);
-      if (self->auth_method != mode) {
-        self->auth_method = mode;
-        GST_INFO_OBJECT (self, "successfully set auth method to %s (%i)",
-            value_nick, mode);
+      if (self->location.authmod != mode) {
+        self->location.authmod = mode;
+        GST_INFO_OBJECT (self, "successfully set auth method to (%i)", mode);
       }
       GST_OBJECT_UNLOCK (self);
       break;
     }
+    case PROP_TIMEOUT:
+      GST_OBJECT_LOCK (self);
+      self->location.timeout = g_value_get_uint (value);
+      GST_OBJECT_UNLOCK (self);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -344,47 +258,53 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
   switch (property_id) {
     case PROP_LOCATION:
       GST_OBJECT_LOCK (self);
-      g_value_take_string (value, gst_rtmp2_uri_get_string (&self->uri, TRUE));
+      g_value_take_string (value, gst_rtmp_location_get_string (&self->location,
+              TRUE));
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_HOST:
       GST_OBJECT_LOCK (self);
-      g_value_set_string (value, self->uri.host);
+      g_value_set_string (value, self->location.host);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_PORT:
       GST_OBJECT_LOCK (self);
-      g_value_set_int (value, self->uri.port);
+      g_value_set_int (value, self->location.port);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_APPLICATION:
       GST_OBJECT_LOCK (self);
-      g_value_set_string (value, self->uri.application);
+      g_value_set_string (value, self->location.application);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_STREAM:
       GST_OBJECT_LOCK (self);
-      g_value_set_string (value, self->uri.stream);
+      g_value_set_string (value, self->location.stream);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_SECURE_TOKEN:
       GST_OBJECT_LOCK (self);
-      g_value_set_string (value, self->secure_token);
+      g_value_set_string (value, self->location.secure_token);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_USERNAME:
       GST_OBJECT_LOCK (self);
-      g_value_set_string (value, self->uri.username);
+      g_value_set_string (value, self->location.username);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_PASSWORD:
       GST_OBJECT_LOCK (self);
-      g_value_set_string (value, self->uri.password);
+      g_value_set_string (value, self->location.password);
       GST_OBJECT_UNLOCK (self);
       break;
-    case PROP_AUTH_METHOD:
+    case PROP_AUTHMOD:
       GST_OBJECT_LOCK (self);
-      g_value_set_enum (value, self->auth_method);
+      g_value_set_enum (value, self->location.authmod);
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_TIMEOUT:
+      GST_OBJECT_LOCK (self);
+      g_value_set_uint (value, self->location.timeout);
       GST_OBJECT_UNLOCK (self);
       break;
     default:
@@ -401,8 +321,7 @@ gst_rtmp2_sink_finalize (GObject * object)
   /* clean up object here */
   g_clear_object (&rtmp2sink->connect_task);
   g_clear_object (&rtmp2sink->connection);
-  gst_rtmp2_uri_clear (&rtmp2sink->uri);
-  g_free (rtmp2sink->secure_token);
+  gst_rtmp_location_clear (&rtmp2sink->location);
   g_clear_object (&rtmp2sink->task);
   g_rec_mutex_clear (&rtmp2sink->task_lock);
   g_mutex_clear (&rtmp2sink->lock);
@@ -562,7 +481,52 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   return GST_FLOW_OK;
 }
 
-/* Internal API */
+/* Mainloop task */
+static void
+gst_rtmp2_sink_task (gpointer user_data)
+{
+  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (user_data);
+  GMainContext *main_context;
+
+  GST_DEBUG ("gst_rtmp2_sink_task starting");
+
+  main_context = g_main_context_new ();
+  g_main_context_push_thread_default (main_context);
+
+  rtmp2sink->task_main_loop = g_main_loop_new (main_context, TRUE);
+
+  new_connect (rtmp2sink);
+
+  g_main_loop_run (rtmp2sink->task_main_loop);
+  g_clear_pointer (&rtmp2sink->task_main_loop, g_main_loop_unref);
+
+  g_clear_pointer (&rtmp2sink->connection, gst_rtmp_connection_close_and_unref);
+
+  while (g_main_context_pending (main_context)) {
+    GST_DEBUG ("iterating main context to clean up");
+    g_main_context_iteration (main_context, FALSE);
+  }
+
+  g_main_context_pop_thread_default (main_context);
+  g_main_context_unref (main_context);
+
+  GST_DEBUG ("gst_rtmp2_sink_task exiting");
+}
+
+static void
+new_connect (GstRtmp2Sink * rtmp2sink)
+{
+  GCancellable *cancellable = g_cancellable_new ();
+
+  g_warn_if_fail (!rtmp2sink->connect_task);
+  rtmp2sink->connect_task =
+      g_task_new (rtmp2sink, cancellable, connect_task_done, NULL);
+
+  gst_rtmp_client_connect_async (&rtmp2sink->location,
+      cancellable, client_connect_done, rtmp2sink->connect_task);
+
+  g_object_unref (cancellable);
+}
 
 static void
 connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
@@ -600,359 +564,56 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
 }
 
 static void
-do_connect (GTask * task)
+client_connect_done (GObject * source, GAsyncResult * result,
+    gpointer user_data)
 {
-  GstRtmpConnectData *connect_data = g_task_get_task_data (task);
-  GstRtmpClient *client = gst_rtmp_client_new ();
-  g_object_set (client, "timeout", DEFAULT_TIMEOUT, NULL);
-
-  gst_rtmp_client_set_server_address (client, connect_data->uri.host);
-  gst_rtmp_client_set_server_port (client, connect_data->uri.port);
-  gst_rtmp_client_connect_async (client, g_task_get_cancellable (task),
-      connect_done, task);
-}
-
-static void
-new_connect (GstRtmp2Sink * rtmp2sink)
-{
-  GstRtmpConnectData *connect_data =
-      gst_rtmp_connect_data_new (&rtmp2sink->uri);
-  GCancellable *cancellable = g_cancellable_new ();
-
-  rtmp2sink->connect_task =
-      g_task_new (rtmp2sink, cancellable, connect_task_done, NULL);
-  g_task_set_task_data (rtmp2sink->connect_task, connect_data,
-      gst_rtmp_connect_data_free);
-
-  do_connect (rtmp2sink->connect_task);
-}
-
-static void
-gst_rtmp2_sink_task (gpointer user_data)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (user_data);
-  GMainContext *main_context;
-
-  GST_DEBUG ("gst_rtmp2_sink_task starting");
-
-  main_context = g_main_context_new ();
-  g_main_context_push_thread_default (main_context);
-
-  rtmp2sink->task_main_loop = g_main_loop_new (main_context, TRUE);
-
-  new_connect (rtmp2sink);
-
-  g_main_loop_run (rtmp2sink->task_main_loop);
-  g_clear_pointer (&rtmp2sink->task_main_loop, g_main_loop_unref);
-
-  g_clear_pointer (&rtmp2sink->connection, rtmp_connection_close_and_unref);
-
-  while (g_main_context_pending (main_context)) {
-    GST_DEBUG ("iterating main context to clean up");
-    g_main_context_iteration (main_context, FALSE);
-  }
-
-  g_main_context_pop_thread_default (main_context);
-  g_main_context_unref (main_context);
-
-  GST_DEBUG ("gst_rtmp2_sink_task exiting");
-}
-
-static void
-connect_done (GObject * source, GAsyncResult * result, gpointer user_data)
-{
-  GstRtmpClient *client = GST_RTMP_CLIENT (source);
   GTask *task = user_data;
-  GstRtmpConnectData *connect_data = g_task_get_task_data (task);
   GError *error = NULL;
-  gboolean ret;
+  GstRtmpConnection *connection;
 
-  ret = gst_rtmp_client_connect_finish (client, result, &error);
-  if (!ret) {
+  connection = gst_rtmp_client_connect_finish (result, &error);
+  if (!connection) {
     g_task_return_error (task, error);
-    g_object_unref (client);
     g_object_unref (task);
     return;
   }
 
-  /* saved here so it gets closed by gst_rtmp_connect_data_free
-   * when the task errors */
-  g_clear_pointer (&connect_data->connection, rtmp_connection_close_and_unref);
-  connect_data->connection =
-      g_object_ref (gst_rtmp_client_get_connection (client));
-  g_object_unref (client);
+  g_task_set_task_data (task, connection, g_object_unref);
 
   if (g_task_return_error_if_cancelled (task)) {
     g_object_unref (task);
     return;
   }
 
-  send_connect (task);
-}
-
-static gchar *
-do_adobe_auth (const gchar * username, const gchar * password,
-    const gchar * salt, const gchar * opaque, const gchar * challenge)
-{
-  guint8 hash[16];              /* MD5 digest */
-  gsize hashlen = sizeof hash;
-  gchar *challenge2, *auth_query;
-  GChecksum *md5;
-
-  md5 = g_checksum_new (G_CHECKSUM_MD5);
-  g_checksum_update (md5, (guchar *) username, -1);
-  g_checksum_update (md5, (guchar *) salt, -1);
-  g_checksum_update (md5, (guchar *) password, -1);
-
-  g_checksum_get_digest (md5, hash, &hashlen);
-  g_warn_if_fail (hashlen == sizeof hash);
-
-  {
-    gchar *hashstr = g_base64_encode ((guchar *) hash, sizeof hash);
-    g_checksum_reset (md5);
-    g_checksum_update (md5, (guchar *) hashstr, -1);
-    g_free (hashstr);
-  }
-
-  if (opaque)
-    g_checksum_update (md5, (guchar *) opaque, -1);
-  else if (challenge)
-    g_checksum_update (md5, (guchar *) challenge, -1);
-
-  challenge2 = g_strdup_printf ("%08x", g_random_int ());
-  g_checksum_update (md5, (guchar *) challenge2, -1);
-
-  g_checksum_get_digest (md5, hash, &hashlen);
-  g_warn_if_fail (hashlen == sizeof hash);
-
-  {
-    gchar *hashstr = g_base64_encode ((guchar *) hash, sizeof hash);
-
-    if (opaque) {
-      auth_query =
-          g_strdup_printf
-          ("authmod=%s&user=%s&challenge=%s&response=%s&opaque=%s", "adobe",
-          username, challenge2, hashstr, opaque);
-    } else {
-      auth_query =
-          g_strdup_printf ("authmod=%s&user=%s&challenge=%s&response=%s",
-          "adobe", username, challenge2, hashstr);
-    }
-    g_free (hashstr);
-  }
-
-  g_checksum_free (md5);
-  g_free (challenge2);
-
-  return auth_query;
-}
-
-static void
-send_connect (GTask * task)
-{
-  GstRtmpConnectData *connect_data = g_task_get_task_data (task);
-  GstAmfNode *node;
-  const gchar *app;
-  gchar *uri;
-
-  node = gst_amf_node_new (GST_AMF_TYPE_OBJECT);
-  app = connect_data->uri.application;
-  uri = gst_rtmp2_uri_get_string (&connect_data->uri, FALSE);
-
-  if (connect_data->authmod > GST_RTMP_AUTHMOD_NONE) {
-    gchar *appstr, *uristr;
-
-    if (connect_data->auth_query) {
-      const gchar *query = connect_data->auth_query;
-      appstr = g_strdup_printf ("%s?%s", app, query);
-      uristr = g_strdup_printf ("%s?%s", uri, query);
-    } else {
-      const gchar *user = connect_data->uri.username;
-      const gchar *authmod = g_strdup ("adobe");
-      appstr = g_strdup_printf ("%s?authmod=%s&user=%s", app, authmod, user);
-      uristr = g_strdup_printf ("%s?authmod=%s&user=%s", uri, authmod, user);
-    }
-
-    gst_amf_object_set_string (node, "app", appstr);
-    gst_amf_object_set_string (node, "tcUrl", uristr);
-
-    g_free (appstr);
-    g_free (uristr);
-  } else {
-    gst_amf_object_set_string (node, "app", app);
-    gst_amf_object_set_string (node, "tcUrl", uri);
-  }
-
-  gst_amf_object_set_string (node, "type", "nonprivate");
-  gst_amf_object_set_string (node, "flashVer", "FMLE/3.0");
-
-  // "fpad": False,
-  // "capabilities": 15,
-  // "audioCodecs": 3191,
-  // "videoCodecs": 252,
-  // "videoFunction": 1,
-
-  gst_rtmp_connection_send_command (connect_data->connection, 3, "connect", 1,
-      node, NULL, cmd_connect_done, task);
-
-  gst_amf_node_free (node);
-  g_free (uri);
-}
-
-static void
-cmd_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
-    const char *command_name, int transaction_id, GstAmfNode * command_object,
-    GstAmfNode * optional_args, gpointer user_data)
-{
-  GTask *task = G_TASK (user_data);
-  GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
-  GstRtmpConnectData *connect_data = g_task_get_task_data (task);
-  const GstAmfNode *node;
-  const gchar *code;
-
-  if (!optional_args) {
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "arguments missing from connect cmd result");
-    g_object_unref (task);
-    return;
-  }
-
-  node = gst_amf_node_get_object (optional_args, "code");
-  if (!node) {
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "result code missing from connect cmd result");
-    g_object_unref (task);
-    return;
-  }
-
-  code = gst_amf_node_get_string (node);
-  GST_INFO_OBJECT (rtmp2sink, "connect result: %s", GST_STR_NULL (code));
-
-  if (g_str_equal (code, "NetConnection.Connect.Success")) {
-    node = gst_amf_node_get_object (optional_args, "secureToken");
-    if (node) {
-      send_secure_token_response (task, gst_amf_node_get_string (node));
-    } else {
-      send_create_stream (task);
-    }
-    return;
-  }
-
-  if (g_str_equal (code, "NetConnection.Connect.Rejected")) {
-    GMatchInfo *match_info;
-    const gchar *desc;
-
-    node = gst_amf_node_get_object (optional_args, "description");
-    if (!node) {
-      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-          "Connect rejected; no description");
-      g_object_unref (task);
-      return;
-    }
-
-    desc = gst_amf_node_get_string (node);
-    if (g_strrstr (desc, "code=403 need auth; authmod=adobe")) {
-      GST_INFO_OBJECT (rtmp2sink, "server requires adobe style auth mode");
-
-      if (!(rtmp2sink->auth_method == GST_RTMP_AUTHMOD_AUTO ||
-              rtmp2sink->auth_method == GST_RTMP_AUTHMOD_ADOBE)) {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-            "adobe style auth required, but incompatible auth method %s selected",
-            g_enum_get_value (G_ENUM_CLASS (g_type_class_ref
-                    (GST_TYPE_RTMP2_AUTH_METHOD)),
-                rtmp2sink->auth_method)->value_nick);
-        g_object_unref (task);
-        return;
-      }
-      if (!connect_data->uri.username || !connect_data->uri.username[0] ||
-          !connect_data->uri.password || !connect_data->uri.password[0]) {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-            "adobe style auth required, but no credentials supplied");
-        g_object_unref (task);
-        return;
-      }
-
-      connect_data->authmod = GST_RTMP_AUTHMOD_ADOBE;
-      do_connect (task);
-      return;
-    }
-
-    if (g_strrstr (desc, "?reason=authfailed")) {
-      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-          "authentication failed! wrong credentials?");
-      g_object_unref (task);
-      return;
-    }
-
-    if (g_regex_match (auth_regex, desc, 0, &match_info)) {
-      const gchar *username = connect_data->uri.username;
-      const gchar *password = connect_data->uri.password;
-      gchar *salt = g_match_info_fetch_named (match_info, "salt");
-      gchar *challenge = g_match_info_fetch_named (match_info, "challenge");
-      gchar *opaque = g_match_info_fetch_named (match_info, "opaque");
-
-      g_match_info_free (match_info);
-
-      GST_INFO_OBJECT (rtmp2sink,
-          "regex parsed auth... user='%s', salt='%s', challenge='%s', opaque='%s'",
-          GST_STR_NULL (connect_data->uri.username), GST_STR_NULL (salt),
-          GST_STR_NULL (challenge), GST_STR_NULL (opaque));
-
-      g_warn_if_fail (connect_data->authmod == GST_RTMP_AUTHMOD_ADOBE);
-      connect_data->authmod = GST_RTMP_AUTHMOD_ADOBE;
-      connect_data->auth_query =
-          do_adobe_auth (username, password, salt, opaque, challenge);
-      g_free (salt);
-      g_free (opaque);
-      g_free (challenge);
-
-      if (!connect_data->auth_query) {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-            "couldn't generate adobe style authentication query");
-        g_object_unref (task);
-        return;
-      }
-
-      do_connect (task);
-      return;
-    }
-
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-        "unhandled auth rejection: %s", GST_STR_NULL (desc));
-    g_object_unref (task);
-    return;
-  }
-
-  g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-      "unhandled connect result code: %s", GST_STR_NULL (code));
-  g_object_unref (task);
+  send_create_stream (task);
 }
 
 static void
 send_create_stream (GTask * task)
 {
-  GstRtmpConnectData *connect_data = g_task_get_task_data (task);
+  GstRtmpConnection *connection = g_task_get_task_data (task);
+  GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
   GstAmfNode *node;
   GstAmfNode *node2;
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node2, connect_data->uri.stream);
-  gst_rtmp_connection_send_command (connect_data->connection, 3,
+  gst_amf_node_set_string (node2, rtmp2sink->location.stream);
+  gst_rtmp_connection_send_command (connection, 3,
       "releaseStream", 2, node, node2, NULL, NULL);
   gst_amf_node_free (node);
   gst_amf_node_free (node2);
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node2, connect_data->uri.stream);
-  gst_rtmp_connection_send_command (connect_data->connection, 3, "FCPublish", 3,
+  gst_amf_node_set_string (node2, rtmp2sink->location.stream);
+  gst_rtmp_connection_send_command (connection, 3, "FCPublish", 3,
       node, node2, NULL, NULL);
   gst_amf_node_free (node);
   gst_amf_node_free (node2);
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
-  gst_rtmp_connection_send_command (connect_data->connection, 3, "createStream",
+  gst_rtmp_connection_send_command (connection, 3, "createStream",
       4, node, NULL, create_stream_done, task);
   gst_amf_node_free (node);
 }
@@ -981,17 +642,18 @@ create_stream_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 static void
 send_publish (GTask * task)
 {
-  GstRtmpConnectData *connect_data = g_task_get_task_data (task);
+  GstRtmpConnection *connection = g_task_get_task_data (task);
+  GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
   GstAmfNode *node;
   GstAmfNode *node2;
   GstAmfNode *node3;
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node2, connect_data->uri.stream);
+  gst_amf_node_set_string (node2, rtmp2sink->location.stream);
   node3 = gst_amf_node_new (GST_AMF_TYPE_STRING);
   gst_amf_node_set_string (node3, DEFAULT_PUBLISHING_TYPE);
-  gst_rtmp_connection_send_command2 (connect_data->connection, 4, 1, "publish",
+  gst_rtmp_connection_send_command2 (connection, 4, 1, "publish",
       5, node, node2, node3, NULL, publish_done, task);
   gst_amf_node_free (node);
   gst_amf_node_free (node2);
@@ -1005,72 +667,35 @@ publish_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 {
   GTask *task = G_TASK (user_data);
   GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
-  GstRtmpConnectData *connect_data = g_task_get_task_data (task);
-  const GstAmfNode *node;
-  const gchar *code = NULL;
 
-  if (!optional_args) {
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "publish failed");
-    g_object_unref (task);
-    return;
-  }
+  switch (optional_args ? optional_args->type : GST_AMF_TYPE_INVALID) {
+    case GST_AMF_TYPE_NUMBER:
+      GST_DEBUG_OBJECT (rtmp2sink, "publish success, stream_id=%.0f",
+          gst_amf_node_get_number (optional_args));
+      g_task_return_pointer (task, g_object_ref (connection),
+          gst_rtmp_connection_close_and_unref);
+      break;
 
-  node = gst_amf_node_get_object (optional_args, "code");
-  if (node) {
-    code = gst_amf_node_get_string (node);
-  }
+    case GST_AMF_TYPE_OBJECT:{
+      const GstAmfNode *node = gst_amf_node_get_object (optional_args, "code");
+      const gchar *code = node ? gst_amf_node_get_string (node) : NULL;
 
-  GST_DEBUG_OBJECT (rtmp2sink, "publish return, stream_id=%.0f, code=%s",
-      gst_amf_node_get_number (optional_args), GST_STR_NULL (code));
-
-  if (code) {
-    if (g_str_equal (code, "NetStream.Publish.Denied")) {
-      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-          "Publish denied! (%s)", code);
-    } else {
-      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-          "unhandled publish result code: %s", code);
+      if (g_str_equal (code, "NetStream.Publish.Denied")) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "Publish denied! (%s)", code);
+      } else {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+            "unhandled publish result code: %s", GST_STR_NULL (code));
+      }
+      break;
     }
-    g_object_unref (task);
-    return;
+
+    default:
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+          "publish failed");
+      break;
   }
 
-  /* Steal and return connection pointer */
-  g_task_return_pointer (task, connect_data->connection,
-      rtmp_connection_close_and_unref);
-  connect_data->connection = NULL;
+  g_task_set_task_data (task, NULL, NULL);
   g_object_unref (task);
-}
-
-static void
-send_secure_token_response (GTask * task, const char *challenge)
-{
-  GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
-  GstRtmpConnectData *connect_data = g_task_get_task_data (task);
-  GstAmfNode *node1;
-  GstAmfNode *node2;
-  gchar *response;
-
-  if (!rtmp2sink->secure_token || !rtmp2sink->secure_token[0]) {
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-        "server requires secure token authentication");
-    g_object_unref (task);
-    return;
-  }
-
-  response = gst_rtmp_tea_decode (rtmp2sink->secure_token, challenge);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "response: %s", response);
-
-  node1 = gst_amf_node_new (GST_AMF_TYPE_NULL);
-  node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string_take (node2, response);
-
-  gst_rtmp_connection_send_command (connect_data->connection, 3,
-      "secureTokenResponse", 0, node1, node2, NULL, NULL);
-  gst_amf_node_free (node1);
-  gst_amf_node_free (node2);
-
-  send_create_stream (task);
 }

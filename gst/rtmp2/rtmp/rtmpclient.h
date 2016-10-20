@@ -25,82 +25,40 @@
 #include <rtmp/rtmpconnection.h>
 
 G_BEGIN_DECLS
-
-#define GST_TYPE_RTMP_CLIENT   (gst_rtmp_client_get_type())
-#define GST_RTMP_CLIENT(obj)   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_RTMP_CLIENT,GstRtmpClient))
-#define GST_RTMP_CLIENT_CLASS(klass)   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_RTMP_CLIENT,GstRtmpClientClass))
-#define GST_IS_RTMP_CLIENT(obj)   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_RTMP_CLIENT))
-#define GST_IS_RTMP_CLIENT_CLASS(obj)   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_RTMP_CLIENT))
-
-typedef struct _GstRtmpClient GstRtmpClient;
-typedef struct _GstRtmpClientClass GstRtmpClientClass;
-
-typedef void (*GstRtmpClientMessageCallback) (GstRtmpClient *client,
-    GstRtmpMessage *message, gpointer user_data);
-typedef void (*GstRtmpClientChunkCallback) (GstRtmpClient *client,
-    GstRtmpChunk *chunk, gpointer user_data);
-
-#define GST_RTMP_ERROR g_quark_from_static_string ("GstRtmpError")
-
-enum {
-  GST_RTMP_ERROR_TOO_LAZY = 0
-};
-
-typedef enum {
-  GST_RTMP_CLIENT_STATE_NEW,
-  GST_RTMP_CLIENT_STATE_CONNECTING,
-  GST_RTMP_CLIENT_STATE_CONNECTED,
-} GstRtmpClientState;
-
-
-struct _GstRtmpClient
+#define GST_TYPE_RTMP_AUTHMOD (gst_rtmp_authmod_get_type ())
+    typedef enum
 {
-  GObject object;
+  GST_RTMP_AUTHMOD_NONE = 0,
+  GST_RTMP_AUTHMOD_AUTO,
+  GST_RTMP_AUTHMOD_ADOBE,
+} GstRtmpAuthmod;
 
-  /* properties */
-  char *server_address;
-  int server_port;
-  char *stream;
-  int timeout;
-
-  /* private */
-  GstRtmpClientState state;
-  GMutex lock;
-  GCond cond;
-  GMainContext *context;
-
-  GSocketConnection *socket_connection;
-
-  GstRtmpConnection *connection;
-};
-
-struct _GstRtmpClientClass
+typedef struct _GstRtmpLocation
 {
-  GObjectClass object_class;
+  gchar *host;
+  guint port;
+  gchar *application;
+  gchar *stream;
+  gchar *username;
+  gchar *password;
+  gchar *secure_token;
+  GstRtmpAuthmod authmod;
+  gint timeout;
+} GstRtmpLocation;
 
-  /* signals */
-  void (*got_chunk) (GstRtmpClient *client, GstRtmpChunk *chunk);
-  void (*got_message) (GstRtmpClient *client, GstRtmpMessage *message);
+void gst_rtmp_location_copy (GstRtmpLocation * dest,
+    const GstRtmpLocation * src);
+void gst_rtmp_location_clear (GstRtmpLocation * uri);
+gchar *gst_rtmp_location_get_string (const GstRtmpLocation * uri,
+    gboolean with_stream);
 
-};
+GType gst_rtmp_authmod_get_type (void);
 
-GType gst_rtmp_client_get_type (void);
-
-GstRtmpClient *gst_rtmp_client_new (void);
-void gst_rtmp_client_set_url (GstRtmpClient *client, const char *url);
-void gst_rtmp_client_set_server_address (GstRtmpClient * client, const char *host);
-void gst_rtmp_client_set_server_port (GstRtmpClient * client, int port);
-void gst_rtmp_client_set_stream (GstRtmpClient * client, const char *stream);
-
-void gst_rtmp_client_connect_async (GstRtmpClient *client,
-    GCancellable *cancellable, GAsyncReadyCallback callback,
+void gst_rtmp_client_connect_async (const GstRtmpLocation * location,
+    GCancellable * cancellable, GAsyncReadyCallback callback,
     gpointer user_data);
-gboolean gst_rtmp_client_connect_finish (GstRtmpClient *client,
-    GAsyncResult *result, GError **error);
-
-GstRtmpConnection *gst_rtmp_client_get_connection (GstRtmpClient *client);
-
+GstRtmpConnection *gst_rtmp_client_connect_finish (GAsyncResult * result,
+    GError ** error);
 
 G_END_DECLS
-
 #endif
