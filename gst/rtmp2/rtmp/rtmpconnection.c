@@ -195,6 +195,8 @@ gst_rtmp_connection_finalize (GObject * object)
       gst_rtmp_chunk_cache_free);
   g_clear_pointer (&rtmpconnection->output_chunk_cache,
       gst_rtmp_chunk_cache_free);
+  g_clear_pointer (&rtmpconnection->output_bytes, g_bytes_unref);
+  g_clear_object (&rtmpconnection->output_chunk);
 
   G_OBJECT_CLASS (gst_rtmp_connection_parent_class)->finalize (object);
 }
@@ -440,36 +442,36 @@ gst_rtmp_connection_write_chunk_done (GObject * obj,
 {
   GOutputStream *os = G_OUTPUT_STREAM (obj);
   GstRtmpConnection *connection = GST_RTMP_CONNECTION (user_data);
-  GstRtmpChunk *chunk = connection->output_chunk;
   GError *error = NULL;
-  gssize ret;
+  gssize ret, expected_size;
 
   GST_LOG ("gst_rtmp_connection_write_chunk_done");
 
+  expected_size = (gssize) g_bytes_get_size (connection->output_bytes);
   connection->writing = FALSE;
 
   ret = g_output_stream_write_finish (os, res, &error);
   if (ret < 0) {
-    GST_DEBUG ("write error: %s", error->message);
+    GST_ERROR ("write error: %s", error->message);
     gst_rtmp_connection_got_closed (connection);
     g_error_free (error);
-    g_object_unref (connection);
-    return;
-  }
-  if (ret < (gssize) g_bytes_get_size (connection->output_bytes)) {
+  } else if (ret < expected_size) {
     GST_DEBUG ("short write %" G_GSIZE_FORMAT " < %" G_GSIZE_FORMAT,
         ret, g_bytes_get_size (connection->output_bytes));
 
     connection->output_bytes =
         gst_rtmp_bytes_remove (connection->output_bytes, ret);
-  } else {
-    g_bytes_unref (connection->output_bytes);
-    connection->output_bytes = NULL;
-    g_object_unref (chunk);
-    connection->output_chunk = NULL;
   }
 
-  gst_rtmp_connection_start_output (connection);
+  if (ret < 0 || ret == expected_size) {
+    g_clear_pointer (&connection->output_bytes, g_bytes_unref);
+    g_clear_object (&connection->output_chunk);
+  }
+
+  if (ret >= 0) {
+    gst_rtmp_connection_start_output (connection);
+  }
+
   g_object_unref (connection);
 }
 
