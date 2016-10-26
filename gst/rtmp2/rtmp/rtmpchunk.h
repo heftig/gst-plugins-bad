@@ -116,10 +116,6 @@ typedef enum {
 GType gst_rtmp_chunk_get_type (void);
 
 GstRtmpChunk *gst_rtmp_chunk_new (void);
-GstRtmpChunkParseStatus gst_rtmp_chunk_can_parse (GBytes *bytes,
-    gsize *chunk_size, GstRtmpChunkCache *cache);
-GstRtmpChunk * gst_rtmp_chunk_new_parse (GBytes *bytes, gsize *chunk_size,
-    GstRtmpChunkCache *cache);
 GBytes * gst_rtmp_chunk_serialize (GstRtmpChunk *chunk,
     GstRtmpChunkHeader *previous_header, gsize max_chunk_size);
 
