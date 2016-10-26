@@ -260,10 +260,21 @@ gst_rtmp_chunk_get_payload (GstRtmpChunk * chunk)
 
 /* chunk cache */
 
+static void
+gst_rtmp_chunk_cache_entry_clear (GstRtmpChunkCacheEntry * entry)
+{
+  g_clear_object (&entry->chunk);
+  g_clear_pointer (&entry->payload, g_free);
+}
+
 GstRtmpChunkCache *
 gst_rtmp_chunk_cache_new (void)
 {
-  return g_array_new (FALSE, TRUE, sizeof (GstRtmpChunkCacheEntry));
+  GstRtmpChunkCache *cache =
+      g_array_new (FALSE, TRUE, sizeof (GstRtmpChunkCacheEntry));
+  g_array_set_clear_func (cache,
+      (GDestroyNotify) gst_rtmp_chunk_cache_entry_clear);
+  return cache;
 }
 
 void
