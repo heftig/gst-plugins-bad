@@ -400,25 +400,16 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
 {
   GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
   GstRtmpChunk *chunk;
-  const char *data;
-  guint8 *buf_data;
+  const guint8 *payload_data;
   gsize payload_size;
+  guint8 *buf_data, *buf_ptr;
+
+  static const guint8 header[] = {
+    0x46, 0x4c, 0x56, 0x01, 0x01, 0x00, 0x00, 0x00,
+    0x09, 0x00, 0x00, 0x00, 0x00,
+  };
 
   GST_LOG_OBJECT (rtmp2src, "create");
-
-  if (!rtmp2src->sent_header) {
-    static const guint8 header[] = {
-      0x46, 0x4c, 0x56, 0x01, 0x01, 0x00, 0x00, 0x00,
-      0x09, 0x00, 0x00, 0x00, 0x00,
-    };
-    guint8 *data;
-
-    rtmp2src->sent_header = TRUE;
-    data = g_memdup (header, sizeof (header));
-    data[4] = 0x1;              /* |4 with audio */
-    *buf = gst_buffer_new_wrapped (data, sizeof (header));
-    return GST_FLOW_OK;
-  }
 
   g_mutex_lock (&rtmp2src->lock);
   chunk = g_queue_pop_head (rtmp2src->queue);
@@ -436,18 +427,31 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
   }
   g_mutex_unlock (&rtmp2src->lock);
 
-  data = g_bytes_get_data (chunk->payload, &payload_size);
+  payload_data = g_bytes_get_data (chunk->payload, &payload_size);
+  buf_data = buf_ptr = g_malloc (payload_size + 11 + 4 +
+      (rtmp2src->sent_header ? 0 : sizeof header));
 
-  buf_data = g_malloc (payload_size + 11 + 4);
-  buf_data[0] = chunk->message_type_id;
-  GST_WRITE_UINT24_BE (buf_data + 1, chunk->message_length);
-  GST_WRITE_UINT24_BE (buf_data + 4, chunk->timestamp);
-  GST_WRITE_UINT24_BE (buf_data + 7, 0);
-  memcpy (buf_data + 11, data, payload_size);
-  GST_WRITE_UINT32_BE (buf_data + payload_size + 11, payload_size + 11);
+  if (!rtmp2src->sent_header) {
+    rtmp2src->sent_header = TRUE;
+    memcpy (buf_ptr, header, sizeof header);
+    buf_ptr += sizeof header;
+  }
+
+  GST_WRITE_UINT8 (buf_ptr, chunk->message_type_id);
+  GST_WRITE_UINT24_BE (buf_ptr + 1, chunk->message_length);
+  GST_WRITE_UINT24_BE (buf_ptr + 4, chunk->timestamp);
+  GST_WRITE_UINT8 (buf_ptr + 7, chunk->timestamp >> 24);
+  GST_WRITE_UINT24_BE (buf_ptr + 8, 0);
+  buf_ptr += 11;
+
+  memcpy (buf_ptr, payload_data, payload_size);
+  buf_ptr += payload_size;
+
+  GST_WRITE_UINT32_BE (buf_ptr, payload_size + 11);
+  buf_ptr += 4;
   gst_rtmp_chunk_free (chunk);
 
-  *buf = gst_buffer_new_wrapped (buf_data, payload_size + 11 + 4);
+  *buf = gst_buffer_new_wrapped (buf_data, buf_ptr - buf_data);
 
   return GST_FLOW_OK;
 }
