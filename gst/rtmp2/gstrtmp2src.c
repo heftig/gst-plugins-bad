@@ -486,6 +486,11 @@ gst_rtmp2_src_task (gpointer user_data)
   g_main_context_pop_thread_default (main_context);
   g_main_context_unref (main_context);
 
+  g_mutex_lock (&rtmp2src->lock);
+  g_queue_foreach (rtmp2src->queue, (GFunc) g_object_unref, NULL);
+  g_queue_clear (rtmp2src->queue);
+  g_mutex_unlock (&rtmp2src->lock);
+
   GST_DEBUG ("gst_rtmp2_src_task exiting");
 }
 
