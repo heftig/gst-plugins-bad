@@ -261,7 +261,6 @@ static void
 gst_rtmp_chunk_cache_entry_clear (GstRtmpChunkCacheEntry * entry)
 {
   g_clear_object (&entry->chunk);
-  g_clear_pointer (&entry->payload, g_free);
 }
 
 GstRtmpChunkCache *
