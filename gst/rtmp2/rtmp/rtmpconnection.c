@@ -111,16 +111,10 @@ gst_rtmp_connection_class_init (GstRtmpConnectionClass * klass)
   gobject_class->finalize = gst_rtmp_connection_finalize;
 
   g_signal_new ("got-chunk", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstRtmpConnectionClass,
-          got_chunk), NULL, NULL, g_cclosure_marshal_generic,
-      G_TYPE_NONE, 1, GST_TYPE_RTMP_CHUNK);
-  g_signal_new ("got-control-chunk", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstRtmpConnectionClass,
-          got_control_chunk), NULL, NULL, g_cclosure_marshal_generic,
+      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
       G_TYPE_NONE, 1, GST_TYPE_RTMP_CHUNK);
   g_signal_new ("closed", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstRtmpConnectionClass, closed),
-      NULL, NULL, g_cclosure_marshal_generic, G_TYPE_NONE, 0);
+      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 static void
@@ -670,7 +664,6 @@ gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
     GST_DEBUG ("got protocol control message, type: %d",
         chunk->message_type_id);
     gst_rtmp_connection_handle_pcm (sc, chunk);
-    g_signal_emit_by_name (sc, "got-control-chunk", chunk);
   } else {
     if (chunk->message_type_id == GST_RTMP_MESSAGE_TYPE_COMMAND) {
       CommandCallback *cb = NULL;

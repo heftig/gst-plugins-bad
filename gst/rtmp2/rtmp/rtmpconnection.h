@@ -83,12 +83,6 @@ struct _GstRtmpConnection
 struct _GstRtmpConnectionClass
 {
   GObjectClass object_class;
-
-  /* signals */
-  void (*got_chunk) (GstRtmpConnection *connection, GstRtmpChunk *chunk);
-  void (*got_control_chunk) (GstRtmpConnection *connection,
-      GstRtmpChunk *chunk);
-  void (*closed) (GstRtmpConnection *connection);
 };
 
 GType gst_rtmp_connection_get_type (void);
