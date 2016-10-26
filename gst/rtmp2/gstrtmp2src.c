@@ -535,7 +535,7 @@ got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
   }
 
   g_mutex_lock (&rtmp2src->lock);
-  g_queue_push_tail (rtmp2src->queue, g_object_ref (chunk));
+  g_queue_push_tail (rtmp2src->queue, chunk);
   g_cond_signal (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
 }
@@ -569,8 +569,8 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
   rtmp2src->connect_task = NULL;
   rtmp2src->connection = g_task_propagate_pointer (task, &error);
   if (rtmp2src->connection) {
-    g_signal_connect_object (rtmp2src->connection, "got-chunk",
-        G_CALLBACK (got_chunk), rtmp2src, 0);
+    gst_rtmp_connection_set_chunk_callback (rtmp2src->connection,
+        got_chunk, g_object_ref (rtmp2src), g_object_unref);
     g_signal_connect_object (rtmp2src->connection, "closed",
         G_CALLBACK (connection_closed), rtmp2src, 0);
   } else {
