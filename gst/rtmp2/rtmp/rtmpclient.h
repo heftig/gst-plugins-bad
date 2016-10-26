@@ -20,7 +20,6 @@
 #ifndef _GST_RTMP_CLIENT_H_
 #define _GST_RTMP_CLIENT_H_
 
-#include <rtmp/rtmpmessage.h>
 #include <rtmp/rtmpchunk.h>
 #include <rtmp/rtmpconnection.h>
 
