@@ -127,8 +127,8 @@ guint32 gst_rtmp_chunk_get_chunk_stream_id (GstRtmpChunk *chunk);
 guint32 gst_rtmp_chunk_get_timestamp (GstRtmpChunk *chunk);
 GBytes * gst_rtmp_chunk_get_payload (GstRtmpChunk *chunk);
 
-gboolean gst_rtmp_chunk_parse_header1 (GstRtmpChunkHeader *header, GBytes * bytes);
-gboolean gst_rtmp_chunk_parse_header2 (GstRtmpChunkHeader *header, GBytes * bytes,
+gboolean gst_rtmp_chunk_parse_header1 (GstRtmpChunkHeader *header, GByteArray * bytes);
+gboolean gst_rtmp_chunk_parse_header2 (GstRtmpChunkHeader *header, GByteArray * bytes,
     GstRtmpChunkHeader *previous_header);
 gboolean gst_rtmp_chunk_parse_message (GstRtmpChunk *chunk,
     char **command_name, double *transaction_id,

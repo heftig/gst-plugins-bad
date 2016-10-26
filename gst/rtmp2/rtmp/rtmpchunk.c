@@ -75,14 +75,13 @@ gst_rtmp_chunk_new (void)
 }
 
 gboolean
-gst_rtmp_chunk_parse_header1 (GstRtmpChunkHeader * header, GBytes * bytes)
+gst_rtmp_chunk_parse_header1 (GstRtmpChunkHeader * header, GByteArray * bytes)
 {
-  const guint8 *data;
+  const guint8 *data = bytes->data;
   const gsize sizes[4] = { 12, 8, 4, 1 };
   int chunk_stream_id;
-  gsize size;
+  gsize size = bytes->len;
 
-  data = g_bytes_get_data (bytes, &size);
   header->format = data[0] >> 6;
   header->header_size = sizes[header->format];
 
@@ -103,14 +102,12 @@ gst_rtmp_chunk_parse_header1 (GstRtmpChunkHeader * header, GBytes * bytes)
 }
 
 gboolean
-gst_rtmp_chunk_parse_header2 (GstRtmpChunkHeader * header, GBytes * bytes,
+gst_rtmp_chunk_parse_header2 (GstRtmpChunkHeader * header, GByteArray * bytes,
     GstRtmpChunkHeader * previous_header)
 {
   int offset;
-  const guint8 *data;
-  gsize size;
-
-  data = g_bytes_get_data (bytes, &size);
+  const guint8 *data = bytes->data;
+  gsize size = bytes->len;
 
   header->format = data[0] >> 6;
   header->chunk_stream_id = data[0] & 0x3f;
