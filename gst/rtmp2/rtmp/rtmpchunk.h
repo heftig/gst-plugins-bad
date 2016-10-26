@@ -25,14 +25,7 @@
 
 G_BEGIN_DECLS
 
-#define GST_TYPE_RTMP_CHUNK   (gst_rtmp_chunk_get_type())
-#define GST_RTMP_CHUNK(obj)   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_RTMP_CHUNK,GstRtmpChunk))
-#define GST_RTMP_CHUNK_CLASS(klass)   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_RTMP_CHUNK,GstRtmpChunkClass))
-#define GST_IS_RTMP_CHUNK(obj)   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_RTMP_CHUNK))
-#define GST_IS_RTMP_CHUNK_CLASS(obj)   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_RTMP_CHUNK))
-
 typedef struct _GstRtmpChunk GstRtmpChunk;
-typedef struct _GstRtmpChunkClass GstRtmpChunkClass;
 typedef GArray GstRtmpChunkCache;
 typedef struct _GstRtmpChunkCacheEntry GstRtmpChunkCacheEntry;
 typedef struct _GstRtmpChunkHeader GstRtmpChunkHeader;
@@ -55,8 +48,6 @@ struct _GstRtmpChunkCacheEntry {
 
 struct _GstRtmpChunk
 {
-  GObject object;
-
   guint32 chunk_stream_id;
   guint32 timestamp;
   gsize message_length;
@@ -64,11 +55,6 @@ struct _GstRtmpChunk
   guint32 stream_id;
 
   GBytes *payload;
-};
-
-struct _GstRtmpChunkClass
-{
-  GObjectClass object_class;
 };
 
 typedef enum {
@@ -112,9 +98,8 @@ typedef enum {
   GST_RTMP_USER_CONTROL_PING_RESPONSE = 7,
 } GstRtmpUserControl;
 
-GType gst_rtmp_chunk_get_type (void);
-
 GstRtmpChunk *gst_rtmp_chunk_new (void);
+void gst_rtmp_chunk_free (gpointer ptr);
 GBytes * gst_rtmp_chunk_serialize (GstRtmpChunk *chunk,
     GstRtmpChunkHeader *previous_header, gsize max_chunk_size);
 

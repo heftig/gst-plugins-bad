@@ -319,7 +319,7 @@ gst_rtmp2_src_finalize (GObject * object)
   g_rec_mutex_clear (&rtmp2src->task_lock);
   g_mutex_clear (&rtmp2src->lock);
   g_cond_clear (&rtmp2src->cond);
-  g_queue_free_full (rtmp2src->queue, g_object_unref);
+  g_queue_free_full (rtmp2src->queue, gst_rtmp_chunk_free);
 
   G_OBJECT_CLASS (gst_rtmp2_src_parent_class)->finalize (object);
 }
@@ -445,7 +445,7 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
   GST_WRITE_UINT24_BE (buf_data + 7, 0);
   memcpy (buf_data + 11, data, payload_size);
   GST_WRITE_UINT32_BE (buf_data + payload_size + 11, payload_size + 11);
-  g_object_unref (chunk);
+  gst_rtmp_chunk_free (chunk);
 
   *buf = gst_buffer_new_wrapped (buf_data, payload_size + 11 + 4);
 
@@ -487,7 +487,7 @@ gst_rtmp2_src_task (gpointer user_data)
   g_main_context_unref (main_context);
 
   g_mutex_lock (&rtmp2src->lock);
-  g_queue_foreach (rtmp2src->queue, (GFunc) g_object_unref, NULL);
+  g_queue_foreach (rtmp2src->queue, (GFunc) gst_rtmp_chunk_free, NULL);
   g_queue_clear (rtmp2src->queue);
   g_mutex_unlock (&rtmp2src->lock);
 
