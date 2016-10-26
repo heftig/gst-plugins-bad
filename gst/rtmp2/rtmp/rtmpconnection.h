@@ -65,7 +65,6 @@ struct _GstRtmpConnection
   GstRtmpConnectionCallback input_callback;
   gboolean handshake_complete;
   GstRtmpChunkCache *input_chunk_cache;
-  GstRtmpChunkCache *output_chunk_cache;
   GList *command_callbacks;
 
   /* chunk currently being written */
