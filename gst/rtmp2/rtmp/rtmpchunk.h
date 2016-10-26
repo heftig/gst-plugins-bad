@@ -103,14 +103,6 @@ void gst_rtmp_chunk_free (gpointer ptr);
 GBytes * gst_rtmp_chunk_serialize (GstRtmpChunk *chunk,
     GstRtmpChunkHeader *previous_header, gsize max_chunk_size);
 
-void gst_rtmp_chunk_set_chunk_stream_id (GstRtmpChunk *chunk, guint32 chunk_stream_id);
-void gst_rtmp_chunk_set_timestamp (GstRtmpChunk *chunk, guint32 timestamp);
-void gst_rtmp_chunk_set_payload (GstRtmpChunk *chunk, GBytes *payload);
-
-guint32 gst_rtmp_chunk_get_chunk_stream_id (GstRtmpChunk *chunk);
-guint32 gst_rtmp_chunk_get_timestamp (GstRtmpChunk *chunk);
-GBytes * gst_rtmp_chunk_get_payload (GstRtmpChunk *chunk);
-
 gboolean gst_rtmp_chunk_parse_header1 (GstRtmpChunkHeader *header, GByteArray * bytes);
 gboolean gst_rtmp_chunk_parse_header2 (GstRtmpChunkHeader *header, GByteArray * bytes,
     GstRtmpChunkHeader *previous_header);
