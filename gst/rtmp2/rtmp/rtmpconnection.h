@@ -39,6 +39,9 @@ typedef void (*GstRtmpCommandCallback) (GstRtmpConnection *connection,
     GstRtmpChunk *chunk, const char *command_name, int transaction_id,
     GstAmfNode *command_object, GstAmfNode *optional_args,
     gpointer user_data);
+typedef void (*GstRtmpConnectionGotChunkFunc)
+    (GstRtmpConnection *connection, GstRtmpChunk *chunk, gpointer user_data);
+
 
 struct _GstRtmpConnection
 {
@@ -67,6 +70,10 @@ struct _GstRtmpConnection
   GstRtmpChunkCache *input_chunk_cache;
   GList *command_callbacks;
 
+  GstRtmpConnectionGotChunkFunc chunk_handler_callback;
+  gpointer chunk_handler_callback_user_data;
+  GDestroyNotify chunk_handler_callback_user_data_destroy;
+
   /* chunk currently being written */
   GstRtmpChunk *output_chunk;
   GBytes *output_bytes;
@@ -92,6 +99,10 @@ void gst_rtmp_connection_set_socket_connection (
     GstRtmpConnection *rtmpconnection, GSocketConnection *connection);
 void gst_rtmp_connection_close (GstRtmpConnection *connection);
 void gst_rtmp_connection_close_and_unref (gpointer ptr);
+
+void gst_rtmp_connection_set_chunk_callback (GstRtmpConnection *connection,
+    GstRtmpConnectionGotChunkFunc callback, gpointer user_data,
+    GDestroyNotify user_data_destroy);
 
 void gst_rtmp_connection_start_handshake (GstRtmpConnection *connection,
     gboolean is_server);

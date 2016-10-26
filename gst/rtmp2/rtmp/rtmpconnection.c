@@ -110,9 +110,6 @@ gst_rtmp_connection_class_init (GstRtmpConnectionClass * klass)
   gobject_class->dispose = gst_rtmp_connection_dispose;
   gobject_class->finalize = gst_rtmp_connection_finalize;
 
-  g_signal_new ("got-chunk", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
-      G_TYPE_NONE, 1, GST_TYPE_RTMP_CHUNK);
   g_signal_new ("closed", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
@@ -171,6 +168,7 @@ gst_rtmp_connection_dispose (GObject * object)
 
   gst_rtmp_connection_close (rtmpconnection);
   g_cancellable_cancel (rtmpconnection->cancellable);
+  gst_rtmp_connection_set_chunk_callback (rtmpconnection, NULL, NULL, NULL);
 
   G_OBJECT_CLASS (gst_rtmp_connection_parent_class)->dispose (object);
 }
@@ -259,6 +257,21 @@ gst_rtmp_connection_close_and_unref (gpointer ptr)
   connection = GST_RTMP_CONNECTION (ptr);
   gst_rtmp_connection_close (connection);
   g_object_unref (connection);
+}
+
+void
+gst_rtmp_connection_set_chunk_callback (GstRtmpConnection * sc,
+    GstRtmpConnectionGotChunkFunc callback, gpointer user_data,
+    GDestroyNotify user_data_destroy)
+{
+  if (sc->chunk_handler_callback_user_data_destroy) {
+    sc->chunk_handler_callback_user_data_destroy
+        (sc->chunk_handler_callback_user_data);
+  }
+
+  sc->chunk_handler_callback = callback;
+  sc->chunk_handler_callback_user_data = user_data;
+  sc->chunk_handler_callback_user_data_destroy = user_data_destroy;
 }
 
 static gboolean
@@ -645,8 +658,6 @@ gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
 
     if (entry->offset == header.message_length) {
       gst_rtmp_connection_handle_chunk (sc, entry->chunk);
-      g_object_unref (entry->chunk);
-
       entry->chunk = NULL;
       entry->offset = 0;
     }
@@ -664,6 +675,7 @@ gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
     GST_DEBUG ("got protocol control message, type: %d",
         chunk->message_type_id);
     gst_rtmp_connection_handle_pcm (sc, chunk);
+    g_object_unref (chunk);
   } else {
     if (chunk->message_type_id == GST_RTMP_MESSAGE_TYPE_COMMAND) {
       CommandCallback *cb = NULL;
@@ -694,7 +706,12 @@ gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
         gst_amf_node_free (optional_args);
     }
     GST_LOG ("got chunk: %" G_GSIZE_FORMAT " bytes", chunk->message_length);
-    g_signal_emit_by_name (sc, "got-chunk", chunk);
+    if (sc->chunk_handler_callback) {
+      sc->chunk_handler_callback (sc, chunk,
+          sc->chunk_handler_callback_user_data);
+    } else {
+      g_object_unref (chunk);
+    }
   }
 }
 
