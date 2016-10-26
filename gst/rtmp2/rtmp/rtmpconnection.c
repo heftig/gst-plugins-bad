@@ -118,7 +118,7 @@ static void
 gst_rtmp_connection_init (GstRtmpConnection * rtmpconnection)
 {
   rtmpconnection->cancellable = g_cancellable_new ();
-  rtmpconnection->output_queue = g_async_queue_new_full (g_object_unref);
+  rtmpconnection->output_queue = g_async_queue_new_full (gst_rtmp_chunk_free);
   rtmpconnection->input_chunk_cache = gst_rtmp_chunk_cache_new ();
 
   rtmpconnection->in_chunk_size = 128;
@@ -187,7 +187,7 @@ gst_rtmp_connection_finalize (GObject * object)
   g_clear_pointer (&rtmpconnection->input_chunk_cache,
       gst_rtmp_chunk_cache_free);
   g_clear_pointer (&rtmpconnection->output_bytes, g_bytes_unref);
-  g_clear_object (&rtmpconnection->output_chunk);
+  g_clear_pointer (&rtmpconnection->output_chunk, gst_rtmp_chunk_free);
 
   g_clear_pointer (&rtmpconnection->input_bytes, g_byte_array_unref);
 
@@ -463,7 +463,7 @@ gst_rtmp_connection_write_chunk_done (GObject * obj,
 
   if (ret < 0 || ret == expected_size) {
     g_clear_pointer (&connection->output_bytes, g_bytes_unref);
-    g_clear_object (&connection->output_chunk);
+    g_clear_pointer (&connection->output_chunk, gst_rtmp_chunk_free);
   }
 
   if (ret >= 0) {
@@ -618,7 +618,7 @@ gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
 
     if (entry->chunk && header.format != 3) {
       GST_ERROR ("expected message continuation, but got new message");
-      g_clear_object (&entry->chunk);
+      g_clear_pointer (&entry->chunk, gst_rtmp_chunk_free);
     }
 
     ret = gst_rtmp_chunk_parse_header2 (&header, sc->input_bytes,
@@ -675,7 +675,7 @@ gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
     GST_DEBUG ("got protocol control message, type: %d",
         chunk->message_type_id);
     gst_rtmp_connection_handle_pcm (sc, chunk);
-    g_object_unref (chunk);
+    gst_rtmp_chunk_free (chunk);
   } else {
     if (chunk->message_type_id == GST_RTMP_MESSAGE_TYPE_COMMAND) {
       CommandCallback *cb = NULL;
@@ -710,7 +710,7 @@ gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
       sc->chunk_handler_callback (sc, chunk,
           sc->chunk_handler_callback_user_data);
     } else {
-      g_object_unref (chunk);
+      gst_rtmp_chunk_free (chunk);
     }
   }
 }
@@ -805,7 +805,7 @@ gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
     GstRtmpChunk * chunk)
 {
   g_return_if_fail (GST_IS_RTMP_CONNECTION (connection));
-  g_return_if_fail (GST_IS_RTMP_CHUNK (chunk));
+  g_return_if_fail (chunk);
 
   g_async_queue_push (connection->output_queue, chunk);
   gst_rtmp_connection_start_output (connection);
