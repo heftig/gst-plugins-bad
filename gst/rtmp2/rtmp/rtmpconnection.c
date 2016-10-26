@@ -612,7 +612,6 @@ gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
     if (entry->chunk && header.format != 3) {
       GST_ERROR ("expected message continuation, but got new message");
       g_clear_object (&entry->chunk);
-      g_clear_pointer (&entry->payload, g_free);
     }
 
     ret = gst_rtmp_chunk_parse_header2 (&header, sc->input_bytes,
@@ -639,22 +638,18 @@ gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
       entry->chunk->message_length = header.message_length;
       entry->chunk->message_type_id = header.message_type_id;
       entry->chunk->stream_id = header.stream_id;
-      entry->payload = g_malloc (header.message_length);
+      entry->chunk->payload = g_bytes_new_take
+          (g_malloc (header.message_length), header.message_length);
     }
     memcpy (&entry->previous_header, &header, sizeof (header));
-
-    memcpy (entry->payload + entry->offset, data + header.header_size,
-        chunk_bytes);
+    memcpy ((guint8 *) g_bytes_get_data (entry->chunk->payload,
+            NULL) + entry->offset, data + header.header_size, chunk_bytes);
     entry->offset += chunk_bytes;
 
     gst_rtmp_connection_take_input_bytes (sc,
         header.header_size + chunk_bytes, NULL);
 
     if (entry->offset == header.message_length) {
-      entry->chunk->payload = g_bytes_new_take (entry->payload,
-          header.message_length);
-      entry->payload = NULL;
-
       gst_rtmp_connection_handle_chunk (sc, entry->chunk);
       g_object_unref (entry->chunk);
 

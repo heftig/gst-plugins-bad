@@ -50,7 +50,6 @@ struct _GstRtmpChunkHeader {
 struct _GstRtmpChunkCacheEntry {
   GstRtmpChunkHeader previous_header;
   GstRtmpChunk *chunk;
-  guint8 *payload;
   gsize offset;
 };
 
