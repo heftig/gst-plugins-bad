@@ -186,46 +186,6 @@ gst_rtmp_chunk_serialize (GstRtmpChunk * chunk,
   return g_bytes_new_take (data, offset);
 }
 
-void
-gst_rtmp_chunk_set_chunk_stream_id (GstRtmpChunk * chunk,
-    guint32 chunk_stream_id)
-{
-  chunk->chunk_stream_id = chunk_stream_id;
-}
-
-void
-gst_rtmp_chunk_set_timestamp (GstRtmpChunk * chunk, guint32 timestamp)
-{
-  chunk->timestamp = timestamp;
-}
-
-void
-gst_rtmp_chunk_set_payload (GstRtmpChunk * chunk, GBytes * payload)
-{
-  if (chunk->payload) {
-    g_bytes_unref (chunk->payload);
-  }
-  chunk->payload = payload;
-}
-
-guint32
-gst_rtmp_chunk_get_chunk_stream_id (GstRtmpChunk * chunk)
-{
-  return chunk->chunk_stream_id;
-}
-
-guint32
-gst_rtmp_chunk_get_timestamp (GstRtmpChunk * chunk)
-{
-  return chunk->timestamp;
-}
-
-GBytes *
-gst_rtmp_chunk_get_payload (GstRtmpChunk * chunk)
-{
-  return chunk->payload;
-}
-
 /* chunk cache */
 
 static void

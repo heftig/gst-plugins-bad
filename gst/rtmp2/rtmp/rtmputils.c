@@ -216,6 +216,6 @@ gst_rtmp_dump_chunk (GstRtmpChunk * chunk, gboolean dir, gboolean dump_message,
     }
   }
   if (dump_data) {
-    gst_rtmp_dump_data (gst_rtmp_chunk_get_payload (chunk));
+    gst_rtmp_dump_data (chunk->payload);
   }
 }
