@@ -311,7 +311,7 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
   guint oldsize;
   GError *error = NULL;
 
-  GST_DEBUG ("input ready");
+  GST_LOG ("input ready");
 
   if (g_source_is_destroyed (g_main_current_source ())) {
     GST_DEBUG ("spurious input_ready callback");
@@ -348,7 +348,7 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
     return G_SOURCE_REMOVE;
   }
 
-  GST_DEBUG ("read %" G_GSIZE_FORMAT " bytes", ret);
+  GST_LOG ("read %" G_GSIZE_FORMAT " bytes", ret);
 
   sc->total_input_bytes += ret;
   sc->bytes_since_ack += ret;
@@ -356,7 +356,7 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
     gst_rtmp_connection_send_ack (sc);
   }
 
-  GST_DEBUG ("needed: %" G_GSIZE_FORMAT, sc->input_needed_bytes);
+  GST_LOG ("needed: %" G_GSIZE_FORMAT, sc->input_needed_bytes);
 
   while (sc->input_callback && sc->input_bytes->len >= sc->input_needed_bytes) {
     GstRtmpConnectionCallback callback;
@@ -657,7 +657,7 @@ gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
       entry->offset = 0;
     }
   }
-  GST_DEBUG ("setting needed bytes to %" G_GSIZE_FORMAT ", have %"
+  GST_LOG ("setting needed bytes to %" G_GSIZE_FORMAT ", have %"
       G_GSIZE_FORMAT, needed_bytes, size);
   gst_rtmp_connection_set_input_callback (sc,
       gst_rtmp_connection_chunk_callback, needed_bytes);
@@ -700,7 +700,7 @@ gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
       if (optional_args)
         gst_amf_node_free (optional_args);
     }
-    GST_DEBUG ("got chunk: %" G_GSIZE_FORMAT " bytes", chunk->message_length);
+    GST_LOG ("got chunk: %" G_GSIZE_FORMAT " bytes", chunk->message_length);
     g_signal_emit_by_name (sc, "got-chunk", chunk);
   }
 }
