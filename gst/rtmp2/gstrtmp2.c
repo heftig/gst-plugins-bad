@@ -24,9 +24,13 @@
 #include "gstrtmp2src.h"
 #include "gstrtmp2sink.h"
 
+GST_DEBUG_CATEGORY (gst_rtmp_debug_category);
+
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
+  GST_DEBUG_CATEGORY_INIT (gst_rtmp_debug_category, "rtmp2", 0,
+      "debug category for rtmp2 plugin");
   gst_element_register (plugin, "rtmp2src", GST_RANK_PRIMARY + 1,
       GST_TYPE_RTMP2_SRC);
   gst_element_register (plugin, "rtmp2sink", GST_RANK_PRIMARY + 1,
