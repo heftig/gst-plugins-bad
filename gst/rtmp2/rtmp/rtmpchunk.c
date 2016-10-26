@@ -24,54 +24,25 @@
 #include <gst/gst.h>
 #include "rtmpchunk.h"
 #include "rtmputils.h"
+#include "rtmpdebug.h"
 #include <string.h>
 
-GST_DEBUG_CATEGORY_STATIC (gst_rtmp_chunk_debug_category);
-#define GST_CAT_DEFAULT gst_rtmp_chunk_debug_category
-
-/* prototypes */
-
-static void gst_rtmp_chunk_finalize (GObject * object);
-
 /* class initialization */
-
-G_DEFINE_TYPE_WITH_CODE (GstRtmpChunk, gst_rtmp_chunk, G_TYPE_OBJECT,
-    GST_DEBUG_CATEGORY_INIT (gst_rtmp_chunk_debug_category, "rtmpchunk", 0,
-        "debug category for rtmpchunk element"));
-
-static void
-gst_rtmp_chunk_class_init (GstRtmpChunkClass * klass)
-{
-  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
-
-  gobject_class->finalize = gst_rtmp_chunk_finalize;
-
-}
-
-static void
-gst_rtmp_chunk_init (GstRtmpChunk * rtmpchunk)
-{
-}
-
-void
-gst_rtmp_chunk_finalize (GObject * object)
-{
-  GstRtmpChunk *rtmpchunk = GST_RTMP_CHUNK (object);
-
-  GST_TRACE_OBJECT (rtmpchunk, "finalize");
-
-  /* clean up object here */
-  if (rtmpchunk->payload) {
-    g_bytes_unref (rtmpchunk->payload);
-  }
-
-  G_OBJECT_CLASS (gst_rtmp_chunk_parent_class)->finalize (object);
-}
 
 GstRtmpChunk *
 gst_rtmp_chunk_new (void)
 {
-  return g_object_new (GST_TYPE_RTMP_CHUNK, NULL);
+  return g_slice_new0 (GstRtmpChunk);
+}
+
+void
+gst_rtmp_chunk_free (gpointer ptr)
+{
+  GstRtmpChunk *chunk = ptr;
+  if (chunk->payload) {
+    g_clear_pointer (&chunk->payload, g_bytes_unref);
+  }
+  g_slice_free (GstRtmpChunk, chunk);
 }
 
 gboolean
@@ -260,7 +231,7 @@ gst_rtmp_chunk_get_payload (GstRtmpChunk * chunk)
 static void
 gst_rtmp_chunk_cache_entry_clear (GstRtmpChunkCacheEntry * entry)
 {
-  g_clear_object (&entry->chunk);
+  g_clear_pointer (&entry->chunk, gst_rtmp_chunk_free);
 }
 
 GstRtmpChunkCache *
