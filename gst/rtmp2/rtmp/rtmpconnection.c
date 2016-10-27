@@ -564,34 +564,33 @@ gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
   while (1) {
     GstRtmpChunkHeader header = { 0 };
     GstRtmpChunkCacheEntry *entry;
-    gboolean ret;
+    gboolean ret, continuation;
     gsize remaining_bytes;
     gsize chunk_bytes;
     const guint8 *data;
+    guint32 chunk_stream_id;
 
-    if (sc->input_bytes->len == 0)
+    chunk_stream_id = gst_rtmp_chunk_parse_stream_id (sc->input_bytes->data,
+        sc->input_bytes->len);
+
+    if (!chunk_stream_id) {
+      needed_bytes = sc->input_bytes->len + 1;
       break;
+    }
 
-    ret = gst_rtmp_chunk_parse_header1 (&header, sc->input_bytes);
+    entry = gst_rtmp_chunk_cache_get (sc->input_chunk_cache, chunk_stream_id);
+    continuation = ! !entry->chunk;
+
+    ret = gst_rtmp_chunk_parse_header (&header, sc->input_bytes->data,
+        sc->input_bytes->len, &entry->previous_header, continuation);
+
     if (!ret) {
       needed_bytes = header.header_size;
       break;
     }
 
-    entry =
-        gst_rtmp_chunk_cache_get (sc->input_chunk_cache,
-        header.chunk_stream_id);
-
-    if (entry->chunk && header.format != 3) {
-      GST_ERROR ("expected message continuation, but got new message");
+    if (continuation && header.format != 3) {
       g_clear_pointer (&entry->chunk, gst_rtmp_chunk_free);
-    }
-
-    ret = gst_rtmp_chunk_parse_header2 (&header, sc->input_bytes,
-        &entry->previous_header);
-    if (!ret) {
-      needed_bytes = header.header_size;
-      break;
     }
 
     remaining_bytes = header.message_length - entry->offset;
@@ -607,7 +606,7 @@ gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
     if (entry->chunk == NULL) {
       entry->chunk = gst_rtmp_chunk_new ();
       entry->chunk->chunk_stream_id = header.chunk_stream_id;
-      entry->chunk->timestamp = header.timestamp;
+      entry->chunk->timestamp = header.timestamp_abs;
       entry->chunk->message_length = header.message_length;
       entry->chunk->message_type_id = header.message_type_id;
       entry->chunk->stream_id = header.stream_id;
