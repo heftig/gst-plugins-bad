@@ -227,16 +227,6 @@ gst_rtmp_chunk_cache_get (GstRtmpChunkCache * cache, guint32 chunk_stream_id)
   return entry;
 }
 
-void
-gst_rtmp_chunk_cache_update (GstRtmpChunkCacheEntry * entry,
-    GstRtmpChunk * chunk)
-{
-  entry->previous_header.timestamp = chunk->timestamp;
-  entry->previous_header.message_length = chunk->message_length;
-  entry->previous_header.message_type_id = chunk->message_type_id;
-  entry->previous_header.stream_id = chunk->stream_id;
-}
-
 gboolean
 gst_rtmp_chunk_parse_message (GstRtmpChunk * chunk, char **command_name,
     double *transaction_id, GstAmfNode ** command_object,
