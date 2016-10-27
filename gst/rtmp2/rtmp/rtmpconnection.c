@@ -308,19 +308,19 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
   g_byte_array_set_size (sc->input_bytes, oldsize + (ret > 0 ? ret : 0));
 
   if (ret < 0) {
-    if (error->code == G_IO_ERROR_TIMED_OUT) {
+    if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT)) {
       /* should retry */
       GST_DEBUG ("timeout, continuing");
       g_error_free (error);
       return G_SOURCE_CONTINUE;
-    } else {
-      GST_ERROR ("read error: %s %d %s", g_quark_to_string (error->domain),
-          error->code, error->message);
     }
+
+    GST_ERROR ("read error: %s %d %s", g_quark_to_string (error->domain),
+        error->code, error->message);
     g_error_free (error);
-    return G_SOURCE_REMOVE;
   }
-  if (ret == 0) {
+
+  if (ret <= 0) {
     gst_rtmp_connection_got_closed (sc);
     return G_SOURCE_REMOVE;
   }
