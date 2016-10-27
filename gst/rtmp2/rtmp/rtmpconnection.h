@@ -58,11 +58,9 @@ struct _GstRtmpConnection
   int state;
   GSocketClient *socket_client;
   GAsyncQueue *output_queue;
-  gboolean writing;
   GMainContext *main_context;
 
   GSource *input_source;
-  GSource *output_source;
   GByteArray *input_bytes;
   guint input_needed_bytes;
   GstRtmpConnectionCallback input_callback;
@@ -75,7 +73,6 @@ struct _GstRtmpConnection
   GDestroyNotify chunk_handler_callback_user_data_destroy;
 
   /* chunk currently being written */
-  GstRtmpChunk *output_chunk;
   GBytes *output_bytes;
 
   /* RTMP configuration */
