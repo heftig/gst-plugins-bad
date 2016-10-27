@@ -106,7 +106,6 @@ void gst_rtmp_connection_start_handshake (GstRtmpConnection *connection,
     gboolean is_server);
 void gst_rtmp_connection_queue_chunk (GstRtmpConnection *connection,
     GstRtmpChunk *chunk);
-void gst_rtmp_connection_dump (GstRtmpConnection *connection);
 
 int gst_rtmp_connection_send_command (GstRtmpConnection *connection,
     int chunk_stream_id, const char *command_name, int transaction_id,
