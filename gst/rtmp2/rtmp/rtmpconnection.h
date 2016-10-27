@@ -64,7 +64,7 @@ struct _GstRtmpConnection
   GSource *input_source;
   GSource *output_source;
   GByteArray *input_bytes;
-  gsize input_needed_bytes;
+  guint input_needed_bytes;
   GstRtmpConnectionCallback input_callback;
   gboolean handshake_complete;
   GstRtmpChunkCache *input_chunk_cache;
