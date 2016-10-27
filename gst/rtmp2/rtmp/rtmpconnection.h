@@ -67,7 +67,7 @@ struct _GstRtmpConnection
   guint input_needed_bytes;
   GstRtmpConnectionCallback input_callback;
   gboolean handshake_complete;
-  GstRtmpChunkCache *input_chunk_cache;
+  GstRtmpChunkCache *input_chunk_cache, *output_chunk_cache;
   GList *command_callbacks;
 
   GstRtmpConnectionGotChunkFunc chunk_handler_callback;

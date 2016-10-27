@@ -153,62 +153,146 @@ gst_rtmp_chunk_parse_header (GstRtmpChunkHeader * header, const guint8 * data,
   return TRUE;
 }
 
+static inline guint8
+select_message_header_fmt (GstRtmpChunk * chunk,
+    GstRtmpChunkHeader * previous_header, guint32 * timestamp,
+    gboolean * ext_ts)
+{
+  *timestamp = chunk->timestamp;
+  *ext_ts = (*timestamp > 0xfffffe);
+
+  if (previous_header == NULL) {
+    return 0;
+  }
+
+  g_return_val_if_fail (previous_header->chunk_stream_id ==
+      chunk->chunk_stream_id, 0);
+
+  if (previous_header->stream_id != chunk->stream_id) {
+    return 0;
+  }
+
+  if (previous_header->timestamp_abs > *timestamp) {
+    GST_DEBUG ("timestamp regression");
+    return 0;
+  }
+
+  *timestamp -= previous_header->timestamp_abs;
+  *ext_ts = (*timestamp > 0xfffffe);
+
+  if (previous_header->message_type_id != chunk->message_type_id) {
+    return 1;
+  }
+
+  if (previous_header->message_length != chunk->message_length) {
+    return 1;
+  }
+
+  if (previous_header->timestamp_rel != *timestamp) {
+    return 2;
+  }
+
+  *ext_ts = FALSE;
+  return 3;
+}
+
 GBytes *
 gst_rtmp_chunk_serialize (GstRtmpChunk * chunk,
     GstRtmpChunkHeader * previous_header, gsize max_chunk_size)
 {
-  guint8 *data;
-  const guint8 *chunkdata;
-  gsize chunksize;
-  int header_fmt;
-  //guint32 timestamp;
-  int offset;
-  int i;
+  guint8 *data, format;
+  const guint8 *payload_data;
+  gsize payload_size, offset, i, basic_header_size, num_chunks;
+  guint32 small_stream_id, timestamp;
+  gboolean ext_ts;
 
-  chunkdata = g_bytes_get_data (chunk->payload, &chunksize);
-  if (chunk->message_length != chunksize) {
-    GST_ERROR ("message_length wrong (%" G_GSIZE_FORMAT " should be %"
-        G_GSIZE_FORMAT ")", chunk->message_length, chunksize);
-  }
+  payload_data = g_bytes_get_data (chunk->payload, &payload_size);
+  g_return_val_if_fail (chunk->message_length == payload_size, NULL);
 
-  g_assert (chunk->chunk_stream_id < 64);
-  data = g_malloc (chunksize + 12 + (chunksize / max_chunk_size));
-
-  /* FIXME this is incomplete and inefficient */
-  header_fmt = 0;
-#if 0
-  if (previous_header->message_length > 0) {
-    header_fmt = 1;
-    timestamp = chunk->timestamp - previous_header->timestamp;
-  }
-#endif
-
-  g_assert (chunk->chunk_stream_id < 64);
-  data[0] = (header_fmt << 6) | (chunk->chunk_stream_id);
-  if (header_fmt == 0) {
-    g_assert (chunk->timestamp < 0xffffff);
-    GST_WRITE_UINT24_BE (data + 1, chunk->timestamp);
-    GST_WRITE_UINT24_BE (data + 4, chunk->message_length);
-    data[7] = chunk->message_type_id;
-    /* SRSLY:  "Message stream ID is stored in little-endian format." */
-    GST_WRITE_UINT32_LE (data + 8, chunk->stream_id);
-    offset = 12;
+  small_stream_id = chunk->chunk_stream_id;
+  if (small_stream_id < 2) {
+    g_return_val_if_reached (NULL);
+  } else if (small_stream_id < 0x40) {
+    basic_header_size = 1;
+  } else if (small_stream_id < 0x140) {
+    basic_header_size = 2;
+    small_stream_id = GST_RTMP_CHUNK_STREAM_TWOBYTE;
+  } else if (small_stream_id < 0x10040) {
+    basic_header_size = 3;
+    small_stream_id = GST_RTMP_CHUNK_STREAM_THREEBYTE;
   } else {
-    GST_WRITE_UINT24_BE (data + 1, chunk->timestamp);
-    GST_WRITE_UINT24_BE (data + 4, chunk->message_length);
-    data[7] = chunk->message_type_id;
-    offset = 8;
+    g_return_val_if_reached (NULL);
   }
-  for (i = 0; i < (int) chunksize; i += max_chunk_size) {
-    if (i != 0) {
-      data[offset] = 0xc0 | chunk->chunk_stream_id;
-      offset++;
+
+  if (previous_header &&
+      previous_header->chunk_stream_id != chunk->chunk_stream_id) {
+    g_warn_if_reached ();
+    previous_header = NULL;
+  }
+
+  format = select_message_header_fmt (chunk, previous_header, &timestamp,
+      &ext_ts);
+  num_chunks = (payload_size + max_chunk_size - 1) / max_chunk_size;
+  data = g_malloc (header_sizes[format] + (ext_ts ? 4 : 0) + payload_size +
+      num_chunks * basic_header_size);
+  offset = 0;
+
+  for (i = 0; i < num_chunks; i++) {
+    gsize chunk_size = MIN (payload_size, max_chunk_size);
+
+    GST_WRITE_UINT8 (data + offset, (format << 6) | small_stream_id);
+
+    switch (small_stream_id) {
+      case GST_RTMP_CHUNK_STREAM_TWOBYTE:
+        GST_WRITE_UINT8 (data + offset + 1, chunk->chunk_stream_id - 0x40);
+        break;
+      case GST_RTMP_CHUNK_STREAM_THREEBYTE:
+        GST_WRITE_UINT16_LE (data + offset + 1, chunk->chunk_stream_id - 0x40);
+        break;
     }
-    memcpy (data + offset, chunkdata + i, MIN (chunksize - i, max_chunk_size));
-    offset += MIN (chunksize - i, max_chunk_size);
+    offset += basic_header_size;
+
+    switch (format) {
+      case 0:
+        /* SRSLY:  "Message stream ID is stored in little-endian format." */
+        GST_WRITE_UINT32_LE (data + offset + 7, chunk->stream_id);
+        /* no break */
+      case 1:
+        GST_WRITE_UINT24_BE (data + offset + 3, chunk->message_length);
+        GST_WRITE_UINT8 (data + offset + 6, chunk->message_type_id);
+        /* no break */
+      case 2:
+        GST_WRITE_UINT24_BE (data + offset, ext_ts ? 0xffffff : timestamp);
+
+        offset += header_sizes[format];
+
+        if (ext_ts) {
+          GST_WRITE_UINT32_BE (data + offset, timestamp);
+          offset += 4;
+        }
+    }
+
+    memcpy (data + offset, payload_data, chunk_size);
+    payload_data += chunk_size;
+    payload_size -= chunk_size;
+    offset += chunk_size;
+
+    format = 3;
+    ext_ts = FALSE;
   }
-  GST_DEBUG ("type: %d in: %" G_GSIZE_FORMAT " out: %d", chunk->message_type_id,
-      chunksize, offset);
+
+  if (previous_header) {
+    previous_header->format = format;
+    previous_header->timestamp_abs = chunk->timestamp;
+    previous_header->timestamp_rel = timestamp;
+    previous_header->message_length = chunk->message_length;
+    previous_header->message_type_id = chunk->message_type_id;
+    previous_header->stream_id = chunk->stream_id;
+  }
+
+  GST_LOG ("serialized chunk type %d %" G_GSIZE_FORMAT " -> %" G_GSIZE_FORMAT
+      " bytes", chunk->message_type_id, g_bytes_get_size (chunk->payload),
+      offset);
 
   return g_bytes_new_take (data, offset);
 }
