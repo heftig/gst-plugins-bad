@@ -86,8 +86,12 @@ struct _CommandCallback
 
 enum
 {
-  PROP_0
+  SIGNAL_CLOSED,
+
+  N_SIGNALS
 };
+
+static guint signals[N_SIGNALS] = { 0, };
 
 /* class initialization */
 
@@ -104,7 +108,7 @@ gst_rtmp_connection_class_init (GstRtmpConnectionClass * klass)
   gobject_class->dispose = gst_rtmp_connection_dispose;
   gobject_class->finalize = gst_rtmp_connection_finalize;
 
-  g_signal_new ("closed", G_TYPE_FROM_CLASS (klass),
+  signals[SIGNAL_CLOSED] = g_signal_new ("closed", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
@@ -393,7 +397,7 @@ static void
 gst_rtmp_connection_got_closed (GstRtmpConnection * connection)
 {
   connection->closed = TRUE;
-  g_signal_emit_by_name (connection, "closed");
+  g_signal_emit (connection, signals[SIGNAL_CLOSED], 0);
 }
 
 static void
