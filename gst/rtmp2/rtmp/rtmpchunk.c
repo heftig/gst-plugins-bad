@@ -162,6 +162,7 @@ select_message_header_fmt (GstRtmpChunk * chunk,
   *ext_ts = (*timestamp > 0xfffffe);
 
   if (previous_header == NULL) {
+    GST_DEBUG ("picking chunk header 0: no previous header");
     return 0;
   }
 
@@ -169,11 +170,16 @@ select_message_header_fmt (GstRtmpChunk * chunk,
       chunk->chunk_stream_id, 0);
 
   if (previous_header->stream_id != chunk->stream_id) {
+    GST_DEBUG ("picking chunk header 0: stream-id mismatch; "
+        "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
+        previous_header->stream_id, chunk->stream_id);
     return 0;
   }
 
   if (previous_header->timestamp_abs > *timestamp) {
-    GST_DEBUG ("timestamp regression");
+    GST_DEBUG ("picking chunk header 0: timestamp regression; "
+        "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
+        previous_header->timestamp_abs, *timestamp);
     return 0;
   }
 
@@ -181,17 +187,26 @@ select_message_header_fmt (GstRtmpChunk * chunk,
   *ext_ts = (*timestamp > 0xfffffe);
 
   if (previous_header->message_type_id != chunk->message_type_id) {
+    GST_LOG ("picking chunk header 1: message type mismatch; want %d got %d",
+        previous_header->message_type_id, chunk->message_type_id);
     return 1;
   }
 
   if (previous_header->message_length != chunk->message_length) {
+    GST_LOG ("picking chunk header 1: message length mismatch; "
+        "want %" G_GSIZE_FORMAT " got %" G_GSIZE_FORMAT,
+        previous_header->message_length, chunk->message_length);
     return 1;
   }
 
   if (previous_header->timestamp_rel != *timestamp) {
+    GST_LOG ("picking chunk header 2: timestamp delta mismatch; "
+        "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
+        previous_header->timestamp_rel, *timestamp);
     return 2;
   }
 
+  GST_LOG ("picking chunk header 3");
   *ext_ts = FALSE;
   return 3;
 }
