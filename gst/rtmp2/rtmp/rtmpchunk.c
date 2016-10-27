@@ -340,15 +340,17 @@ gst_rtmp_chunk_cache_free (GstRtmpChunkCache * cache)
 GstRtmpChunkCacheEntry *
 gst_rtmp_chunk_cache_get (GstRtmpChunkCache * cache, guint32 chunk_stream_id)
 {
-  int i;
+  guint i;
   GstRtmpChunkCacheEntry *entry;
-  for (i = 0; i < (int) cache->len; i++) {
+
+  for (i = 0; i < cache->len; i++) {
     entry = &g_array_index (cache, GstRtmpChunkCacheEntry, i);
     if (entry->previous_header.chunk_stream_id == chunk_stream_id)
       return entry;
   }
-  g_array_set_size (cache, cache->len + 1);
-  entry = &g_array_index (cache, GstRtmpChunkCacheEntry, cache->len - 1);
+
+  g_array_set_size (cache, i + 1);
+  entry = &g_array_index (cache, GstRtmpChunkCacheEntry, i);
   entry->previous_header.chunk_stream_id = chunk_stream_id;
   return entry;
 }
