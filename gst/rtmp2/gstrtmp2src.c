@@ -519,29 +519,37 @@ got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 {
   GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (user_data);
 
+  g_return_if_fail (chunk);
+
   if (chunk->stream_id == 0) {
-    return;
+    goto uninteresting;
+  }
+
+  if (chunk->message_length == 0) {
+    goto uninteresting;
   }
 
   switch (chunk->message_type_id) {
     case GST_RTMP_MESSAGE_TYPE_VIDEO:
     case GST_RTMP_MESSAGE_TYPE_AUDIO:
-      break;
-
     case GST_RTMP_MESSAGE_TYPE_DATA:
-      if (chunk->message_length <= 100) {
-        return;
-      }
       break;
 
     default:
-      return;
+      goto uninteresting;
   }
 
   g_mutex_lock (&rtmp2src->lock);
   g_queue_push_tail (rtmp2src->queue, chunk);
   g_cond_signal (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
+  return;
+
+uninteresting:
+  GST_DEBUG_OBJECT (rtmp2src,
+      "not interested in chunk type %d stream %d size %" G_GSIZE_FORMAT,
+      chunk->message_type_id, chunk->stream_id, chunk->message_length);
+  gst_rtmp_chunk_free (chunk);
 }
 
 static void
