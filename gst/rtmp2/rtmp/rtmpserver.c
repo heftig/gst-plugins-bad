@@ -182,8 +182,7 @@ gst_rtmp_server_incoming (GSocketService * service,
   GST_INFO ("client connected");
 
   g_object_ref (socket_connection);
-  connection = gst_rtmp_connection_new ();
-  gst_rtmp_connection_set_socket_connection (connection, socket_connection);
+  connection = gst_rtmp_connection_new (socket_connection);
   gst_rtmp_server_add_connection (rtmpserver, connection);
   gst_rtmp_connection_start_handshake (connection, TRUE);
 

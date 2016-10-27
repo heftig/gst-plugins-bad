@@ -94,9 +94,7 @@ struct _GstRtmpConnectionClass
 
 GType gst_rtmp_connection_get_type (void);
 
-GstRtmpConnection *gst_rtmp_connection_new (void);
-void gst_rtmp_connection_set_socket_connection (
-    GstRtmpConnection *rtmpconnection, GSocketConnection *connection);
+GstRtmpConnection *gst_rtmp_connection_new (GSocketConnection * connection);
 void gst_rtmp_connection_close (GstRtmpConnection *connection);
 void gst_rtmp_connection_close_and_unref (gpointer ptr);
 

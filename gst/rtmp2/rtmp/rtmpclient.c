@@ -221,10 +221,7 @@ socket_connect_done (GObject * source, GAsyncResult * result,
     return;
   }
 
-  rtmp_connection = gst_rtmp_connection_new ();
-
-  gst_rtmp_connection_set_socket_connection (rtmp_connection,
-      socket_connection);
+  rtmp_connection = gst_rtmp_connection_new (socket_connection);
   gst_rtmp_connection_start_handshake (rtmp_connection, FALSE);
 
   send_connect (task, rtmp_connection);
