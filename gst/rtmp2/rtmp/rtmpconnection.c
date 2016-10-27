@@ -778,19 +778,33 @@ gst_rtmp_connection_call_input_callback (GstRtmpConnection * connection)
   (*input_callback) (connection);
 }
 
+static gboolean
+start_client_handshake (gpointer user_data)
+{
+  GstRtmpConnection *connection = user_data;
+
+  gst_rtmp_connection_client_handshake1 (connection);
+
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean
+start_server_handshake (gpointer user_data)
+{
+  GstRtmpConnection *connection = user_data;
+
+  gst_rtmp_connection_set_input_callback (connection,
+      gst_rtmp_connection_server_handshake1, 1 + 1536);
+
+  return G_SOURCE_REMOVE;
+}
+
 void
 gst_rtmp_connection_start_handshake (GstRtmpConnection * connection,
     gboolean is_server)
 {
-  if (connection->thread != g_thread_self ()) {
-    GST_ERROR ("Called from wrong thread");
-  }
-  if (is_server) {
-    gst_rtmp_connection_set_input_callback (connection,
-        gst_rtmp_connection_server_handshake1, 1 + 1536);
-  } else {
-    gst_rtmp_connection_client_handshake1 (connection);
-  }
+  g_main_context_invoke (connection->main_context, is_server ?
+      start_server_handshake : start_client_handshake, connection);
 }
 
 static void
