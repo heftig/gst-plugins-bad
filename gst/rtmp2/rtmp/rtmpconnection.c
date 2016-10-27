@@ -123,6 +123,7 @@ gst_rtmp_connection_init (GstRtmpConnection * rtmpconnection)
   rtmpconnection->cancellable = g_cancellable_new ();
   rtmpconnection->output_queue = g_async_queue_new_full (gst_rtmp_chunk_free);
   rtmpconnection->input_chunk_cache = gst_rtmp_chunk_cache_new ();
+  rtmpconnection->output_chunk_cache = gst_rtmp_chunk_cache_new ();
 
   rtmpconnection->in_chunk_size = 128;
   rtmpconnection->out_chunk_size = 128;
@@ -158,6 +159,8 @@ gst_rtmp_connection_finalize (GObject * object)
   g_clear_object (&rtmpconnection->connection);
   g_clear_pointer (&rtmpconnection->output_queue, g_async_queue_unref);
   g_clear_pointer (&rtmpconnection->input_chunk_cache,
+      gst_rtmp_chunk_cache_free);
+  g_clear_pointer (&rtmpconnection->output_chunk_cache,
       gst_rtmp_chunk_cache_free);
   g_clear_pointer (&rtmpconnection->output_bytes, g_bytes_unref);
   g_clear_pointer (&rtmpconnection->output_chunk, gst_rtmp_chunk_free);
@@ -370,14 +373,19 @@ gst_rtmp_connection_output_ready (GOutputStream * os, gpointer user_data)
   if (sc->output_chunk) {
     chunk = sc->output_chunk;
   } else {
+    GstRtmpChunkCacheEntry *entry;
+
     chunk = g_async_queue_try_pop (sc->output_queue);
     if (!chunk) {
       return G_SOURCE_REMOVE;
     }
     sc->output_chunk = chunk;
 
-    sc->output_bytes =
-        gst_rtmp_chunk_serialize (chunk, NULL, sc->out_chunk_size);
+    entry = gst_rtmp_chunk_cache_get (sc->input_chunk_cache,
+        chunk->chunk_stream_id);
+
+    sc->output_bytes = gst_rtmp_chunk_serialize (chunk,
+        &entry->previous_header, sc->out_chunk_size);
   }
 
   os = g_io_stream_get_output_stream (G_IO_STREAM (sc->connection));
