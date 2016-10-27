@@ -58,13 +58,6 @@ struct _GstRtmpChunk
 };
 
 typedef enum {
-  GST_RTMP_CHUNK_PARSE_ERROR = 0,
-  GST_RTMP_CHUNK_PARSE_OK,
-  GST_RTMP_CHUNK_PARSE_UNKNOWN,
-  GST_RTMP_CHUNK_PARSE_NEED_BYTES,
-} GstRtmpChunkParseStatus;
-
-typedef enum {
   GST_RTMP_CHUNK_STREAM_TWOBYTE = 0,
   GST_RTMP_CHUNK_STREAM_THREEBYTE = 1,
   GST_RTMP_CHUNK_STREAM_PROTOCOL = 2,
@@ -110,16 +103,12 @@ gboolean gst_rtmp_chunk_parse_message (GstRtmpChunk *chunk,
     char **command_name, double *transaction_id,
     GstAmfNode **command_object, GstAmfNode **optional_args);
 
-
-
 /* chunk cache */
 
 GstRtmpChunkCache *gst_rtmp_chunk_cache_new (void);
 void gst_rtmp_chunk_cache_free (GstRtmpChunkCache *cache);
 GstRtmpChunkCacheEntry * gst_rtmp_chunk_cache_get (
     GstRtmpChunkCache *cache, guint32 chunk_stream_id);
-void gst_rtmp_chunk_cache_update (GstRtmpChunkCacheEntry * entry,
-    GstRtmpChunk * chunk);
 
 G_END_DECLS
 
