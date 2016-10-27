@@ -53,10 +53,9 @@ static void gst_rtmp_connection_server_handshake1_done (GObject * obj,
 static void gst_rtmp_connection_server_handshake2 (GstRtmpConnection * sc);
 static void gst_rtmp_connection_write_chunk_done (GObject * obj,
     GAsyncResult * res, gpointer user_data);
-static void
-gst_rtmp_connection_set_input_callback (GstRtmpConnection * connection,
-    void (*input_callback) (GstRtmpConnection * connection),
-    gsize needed_bytes);
+static void gst_rtmp_connection_set_input_callback (GstRtmpConnection * sc,
+    GstRtmpConnectionCallback input_callback, guint needed_bytes);
+static void gst_rtmp_connection_call_input_callback (GstRtmpConnection * sc);
 static void gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc);
 static void gst_rtmp_connection_start_output (GstRtmpConnection * sc);
 static void
@@ -110,6 +109,12 @@ gst_rtmp_connection_class_init (GstRtmpConnectionClass * klass)
 
   signals[SIGNAL_CLOSED] = g_signal_new ("closed", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+
+  GST_DEBUG_REGISTER_FUNCPTR (gst_rtmp_connection_chunk_callback);
+  GST_DEBUG_REGISTER_FUNCPTR (gst_rtmp_connection_client_handshake1);
+  GST_DEBUG_REGISTER_FUNCPTR (gst_rtmp_connection_client_handshake2);
+  GST_DEBUG_REGISTER_FUNCPTR (gst_rtmp_connection_server_handshake1);
+  GST_DEBUG_REGISTER_FUNCPTR (gst_rtmp_connection_server_handshake2);
 }
 
 static void
@@ -333,16 +338,7 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
     gst_rtmp_connection_send_ack (sc);
   }
 
-  GST_LOG ("needed: %" G_GSIZE_FORMAT, sc->input_needed_bytes);
-
-  while (sc->input_callback && sc->input_bytes->len >= sc->input_needed_bytes) {
-    GstRtmpConnectionCallback callback;
-    GST_DEBUG ("got %u bytes, calling callback", sc->input_bytes->len);
-    callback = sc->input_callback;
-    sc->input_callback = NULL;
-    (*callback) (sc);
-  }
-
+  gst_rtmp_connection_call_input_callback (sc);
   return G_SOURCE_CONTINUE;
 }
 
@@ -553,13 +549,8 @@ gst_rtmp_connection_server_handshake2 (GstRtmpConnection * sc)
   GST_INFO ("server handshake finished");
   sc->handshake_complete = TRUE;
 
-  if (sc->input_bytes->len >= 1) {
-    GST_DEBUG ("spare bytes after handshake: %u", sc->input_bytes->len);
-    gst_rtmp_connection_chunk_callback (sc);
-  }
-
   gst_rtmp_connection_set_input_callback (sc,
-      gst_rtmp_connection_chunk_callback, 0);
+      gst_rtmp_connection_chunk_callback, 1);
 
   gst_rtmp_connection_start_output (sc);
 }
@@ -567,7 +558,7 @@ gst_rtmp_connection_server_handshake2 (GstRtmpConnection * sc)
 static void
 gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
 {
-  gsize needed_bytes = 0;
+  gsize needed_bytes = 1;
   gsize size = 0;
 
   while (1) {
@@ -637,8 +628,7 @@ gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc)
       entry->offset = 0;
     }
   }
-  GST_LOG ("setting needed bytes to %" G_GSIZE_FORMAT ", have %"
-      G_GSIZE_FORMAT, needed_bytes, size);
+
   gst_rtmp_connection_set_input_callback (sc,
       gst_rtmp_connection_chunk_callback, needed_bytes);
 }
@@ -788,26 +778,42 @@ gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
 
 static void
 gst_rtmp_connection_set_input_callback (GstRtmpConnection * connection,
-    void (*input_callback) (GstRtmpConnection * connection), gsize needed_bytes)
+    GstRtmpConnectionCallback input_callback, guint needed_bytes)
 {
-  if (connection->input_callback) {
-    GST_ERROR ("already an input callback");
-  }
+  g_return_if_fail (input_callback);
+  g_return_if_fail (needed_bytes > 0);
+  g_warn_if_fail (!connection->input_callback);
+
   connection->input_callback = input_callback;
   connection->input_needed_bytes = needed_bytes;
-  if (needed_bytes == 0) {
-    connection->input_needed_bytes = 1;
+
+  GST_LOG ("set input callback %s", GST_DEBUG_FUNCPTR_NAME (input_callback));
+
+  gst_rtmp_connection_call_input_callback (connection);
+}
+
+static void
+gst_rtmp_connection_call_input_callback (GstRtmpConnection * connection)
+{
+  GstRtmpConnectionCallback input_callback = connection->input_callback;
+  guint need = connection->input_needed_bytes,
+      len = connection->input_bytes->len;
+
+  if (!input_callback) {
+    GST_LOG ("got %u bytes, no input callback set", len);
+    return;
   }
 
-  if (connection->input_callback &&
-      connection->input_bytes->len >= connection->input_needed_bytes) {
-    GstRtmpConnectionCallback callback;
-    GST_DEBUG ("got %u bytes, calling callback", connection->input_bytes->len);
-    callback = connection->input_callback;
-    connection->input_callback = NULL;
-    (*callback) (connection);
+  if (len < connection->input_needed_bytes) {
+    GST_LOG ("got %u < %u bytes for input callback %s, need more",
+        len, need, GST_DEBUG_FUNCPTR_NAME (input_callback));
+    return;
   }
 
+  GST_LOG ("got %u >= %u bytes, calling input callback %s",
+      len, need, GST_DEBUG_FUNCPTR_NAME (input_callback));
+  connection->input_callback = NULL;
+  (*input_callback) (connection);
 }
 
 void
@@ -819,7 +825,7 @@ gst_rtmp_connection_start_handshake (GstRtmpConnection * connection,
   }
   if (is_server) {
     gst_rtmp_connection_set_input_callback (connection,
-        gst_rtmp_connection_server_handshake1, 1537);
+        gst_rtmp_connection_server_handshake1, 1 + 1536);
   } else {
     gst_rtmp_connection_client_handshake1 (connection);
   }
@@ -918,13 +924,8 @@ gst_rtmp_connection_client_handshake2_done (GObject * obj,
   GST_INFO ("client handshake finished");
   sc->handshake_complete = TRUE;
 
-  if (sc->input_bytes->len >= 1) {
-    GST_DEBUG ("spare bytes after handshake: %u", sc->input_bytes->len);
-    gst_rtmp_connection_chunk_callback (sc);
-  } else {
-    gst_rtmp_connection_set_input_callback (sc,
-        gst_rtmp_connection_chunk_callback, 0);
-  }
+  gst_rtmp_connection_set_input_callback (sc,
+      gst_rtmp_connection_chunk_callback, 1);
 
   gst_rtmp_connection_start_output (sc);
 }
