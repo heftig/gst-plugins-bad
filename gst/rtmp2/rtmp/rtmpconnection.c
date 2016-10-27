@@ -166,6 +166,8 @@ gst_rtmp_connection_finalize (GObject * object)
   g_clear_pointer (&rtmpconnection->output_chunk, gst_rtmp_chunk_free);
 
   g_clear_pointer (&rtmpconnection->input_bytes, g_byte_array_unref);
+  g_clear_pointer (&rtmpconnection->main_context, g_main_context_unref);
+  g_clear_pointer (&rtmpconnection->thread, g_thread_unref);
 
   G_OBJECT_CLASS (gst_rtmp_connection_parent_class)->finalize (object);
 }
@@ -176,7 +178,7 @@ gst_rtmp_connection_set_socket_connection (GstRtmpConnection * sc,
 {
   GInputStream *is;
 
-  sc->thread = g_thread_self ();
+  sc->thread = g_thread_ref (g_thread_self ());
   sc->main_context = g_main_context_ref_thread_default ();
   sc->connection = g_object_ref (connection);
 
