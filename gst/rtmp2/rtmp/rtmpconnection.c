@@ -396,6 +396,11 @@ gst_rtmp_connection_output_ready (GOutputStream * os, gpointer user_data)
 static void
 gst_rtmp_connection_got_closed (GstRtmpConnection * connection)
 {
+  if (connection->closed) {
+    return;
+  }
+
+  GST_INFO ("connection closed");
   connection->closed = TRUE;
   g_signal_emit (connection, signals[SIGNAL_CLOSED], 0);
 }
