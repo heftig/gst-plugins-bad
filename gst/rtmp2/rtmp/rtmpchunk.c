@@ -45,85 +45,112 @@ gst_rtmp_chunk_free (gpointer ptr)
   g_slice_free (GstRtmpChunk, chunk);
 }
 
-gboolean
-gst_rtmp_chunk_parse_header1 (GstRtmpChunkHeader * header, GByteArray * bytes)
+guint32
+gst_rtmp_chunk_parse_stream_id (const guint8 * data, gsize size)
 {
-  const guint8 *data = bytes->data;
-  const gsize sizes[4] = { 12, 8, 4, 1 };
-  int chunk_stream_id;
-  gsize size = bytes->len;
+  guint32 ret = 0;
 
-  header->format = data[0] >> 6;
-  header->header_size = sizes[header->format];
+  if (size >= 1) {
+    ret = GST_READ_UINT8 (data) & 0x3f;
 
-  chunk_stream_id = data[0] & 0x3f;
-  if (chunk_stream_id == GST_RTMP_CHUNK_STREAM_TWOBYTE) {
-    if (size >= 2)
-      header->chunk_stream_id = 64 + data[1];
-    header->header_size += 1;
-  } else if (chunk_stream_id == GST_RTMP_CHUNK_STREAM_THREEBYTE) {
-    if (size >= 3)
-      header->chunk_stream_id = 64 + data[1] + (data[2] << 8);
-    header->header_size += 2;
-  } else {
-    header->chunk_stream_id = chunk_stream_id;
+    if (ret == GST_RTMP_CHUNK_STREAM_TWOBYTE) {
+      if (size >= 2) {
+        ret = 64 + GST_READ_UINT8 (data + 1);
+      } else {
+        ret = 0;
+      }
+    } else if (ret == GST_RTMP_CHUNK_STREAM_THREEBYTE) {
+      if (size >= 3) {
+        ret = 64 + GST_READ_UINT16_LE (data + 1);
+      } else {
+        ret = 0;
+      }
+    }
   }
 
-  return (header->header_size <= size);
+  return ret;
 }
 
+static const gsize header_sizes[4] = { 11, 7, 3, 0 };
+
 gboolean
-gst_rtmp_chunk_parse_header2 (GstRtmpChunkHeader * header, GByteArray * bytes,
-    GstRtmpChunkHeader * previous_header)
+gst_rtmp_chunk_parse_header (GstRtmpChunkHeader * header, const guint8 * data,
+    gsize size, GstRtmpChunkHeader * previous_header, gboolean continuation)
 {
-  int offset;
-  const guint8 *data = bytes->data;
-  gsize size = bytes->len;
+  const guint8 *msg_header_start, *payload_start;
 
-  header->format = data[0] >> 6;
-  header->chunk_stream_id = data[0] & 0x3f;
-  offset = 1;
-  if (header->chunk_stream_id == GST_RTMP_CHUNK_STREAM_TWOBYTE) {
-    header->chunk_stream_id = 64 + data[1];
-    offset = 2;
-  } else if (header->chunk_stream_id == GST_RTMP_CHUNK_STREAM_THREEBYTE) {
-    header->chunk_stream_id = 64 + GST_READ_UINT16_LE (data + 1);
-    offset = 3;
-  }
-  if (header->format == 0) {
-    header->timestamp = GST_READ_UINT24_BE (data + offset);
-    header->message_length = GST_READ_UINT24_BE (data + offset + 3);
-    header->message_type_id = data[offset + 6];
-    /* SRSLY:  "Message stream ID is stored in little-endian format." */
-    header->stream_id = GST_READ_UINT32_LE (data + offset + 7);
-    offset += 11;
-    if (header->timestamp == 0xffffff) {
-      GST_ERROR ("untested long timestamp");
-      header->timestamp = GST_READ_UINT32_BE (data + offset);
-      offset += 4;
-    }
-  } else {
-    header->timestamp = previous_header->timestamp;
-    header->message_length = previous_header->message_length;
-    header->message_type_id = previous_header->message_type_id;
-    header->stream_id = previous_header->stream_id;
+  header->chunk_stream_id = gst_rtmp_chunk_parse_stream_id (data, size);
 
-    if (header->format == 1) {
-      header->timestamp += GST_READ_UINT24_BE (data + offset);
-      header->message_length = GST_READ_UINT24_BE (data + offset + 3);
-      header->message_type_id = data[offset + 6];
-      offset += 7;
-    } else if (header->format == 2) {
-      header->timestamp += GST_READ_UINT24_BE (data + offset);
-      offset += 3;
-    } else {
-      /* ok */
-    }
+  g_warn_if_fail (previous_header->chunk_stream_id == header->chunk_stream_id);
+
+  header->format = GST_READ_UINT8 (data) >> 6;
+  header->header_size = header_sizes[header->format];
+
+  switch (GST_READ_UINT8 (data) & 0x3f) {
+    case GST_RTMP_CHUNK_STREAM_TWOBYTE:
+      msg_header_start = data + 2;
+      header->header_size += 2;
+      break;
+    case GST_RTMP_CHUNK_STREAM_THREEBYTE:
+      msg_header_start = data + 3;
+      header->header_size += 3;
+      break;
+    default:
+      msg_header_start = data + 1;
+      header->header_size += 1;
+      break;
   }
 
-  header->header_size = offset;
+  if (size < header->header_size) {
+    GST_LOG ("not enough bytes to read header");
+    return FALSE;
+  }
 
-  return (header->header_size <= size);
+  header->timestamp_abs = previous_header->timestamp_abs;
+  header->timestamp_rel = previous_header->timestamp_rel;
+  header->message_length = previous_header->message_length;
+  header->message_type_id = previous_header->message_type_id;
+  header->stream_id = previous_header->stream_id;
+
+  payload_start = msg_header_start + header->header_size;
+
+  switch (header->format) {
+    case 0:
+      header->timestamp_abs = 0;
+      /* SRSLY:  "Message stream ID is stored in little-endian format." */
+      header->stream_id = GST_READ_UINT32_LE (msg_header_start + 7);
+      /* no break */
+    case 1:
+      header->message_type_id = GST_READ_UINT8 (msg_header_start + 6);
+      header->message_length = GST_READ_UINT24_BE (msg_header_start + 3);
+      /* no break */
+    case 2:
+      header->timestamp_rel = GST_READ_UINT24_BE (msg_header_start);
+
+      if (header->timestamp_rel == 0xffffff) {
+        GST_FIXME ("untested extended timestamp");
+
+        header->header_size += 4;
+        if (size < header->header_size) {
+          GST_LOG ("not enough bytes to read extended timestamp");
+          return FALSE;
+        }
+
+        header->timestamp_rel = GST_READ_UINT32_BE (payload_start);
+        payload_start += 4;
+      }
+  }
+
+  if (continuation && header->format != 3) {
+    GST_ERROR ("expected message continuation, but got new message");
+    continuation = FALSE;
+  }
+
+  if (!continuation) {
+    header->timestamp_abs += header->timestamp_rel;
+  }
+
+  return TRUE;
 }
 
 GBytes *

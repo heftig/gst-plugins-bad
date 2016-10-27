@@ -31,12 +31,12 @@ typedef struct _GstRtmpChunkCacheEntry GstRtmpChunkCacheEntry;
 typedef struct _GstRtmpChunkHeader GstRtmpChunkHeader;
 
 struct _GstRtmpChunkHeader {
-  int format;
+  gint format;
   gsize header_size;
   guint32 chunk_stream_id;
-  guint32 timestamp;
+  guint32 timestamp_abs, timestamp_rel;
   gsize message_length;
-  int message_type_id;
+  gint message_type_id;
   guint32 stream_id;
 };
 
@@ -51,7 +51,7 @@ struct _GstRtmpChunk
   guint32 chunk_stream_id;
   guint32 timestamp;
   gsize message_length;
-  int message_type_id;
+  gint message_type_id;
   guint32 stream_id;
 
   GBytes *payload;
@@ -96,9 +96,10 @@ void gst_rtmp_chunk_free (gpointer ptr);
 GBytes * gst_rtmp_chunk_serialize (GstRtmpChunk *chunk,
     GstRtmpChunkHeader *previous_header, gsize max_chunk_size);
 
-gboolean gst_rtmp_chunk_parse_header1 (GstRtmpChunkHeader *header, GByteArray * bytes);
-gboolean gst_rtmp_chunk_parse_header2 (GstRtmpChunkHeader *header, GByteArray * bytes,
-    GstRtmpChunkHeader *previous_header);
+guint32 gst_rtmp_chunk_parse_stream_id (const guint8 * data, gsize size);
+gboolean gst_rtmp_chunk_parse_header (GstRtmpChunkHeader *header,
+    const guint8 * data, gsize size, GstRtmpChunkHeader *previous_header,
+    gboolean continuation);
 gboolean gst_rtmp_chunk_parse_message (GstRtmpChunk *chunk,
     char **command_name, double *transaction_id,
     GstAmfNode **command_object, GstAmfNode **optional_args);
