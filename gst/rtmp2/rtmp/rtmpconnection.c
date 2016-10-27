@@ -58,11 +58,11 @@ static void gst_rtmp_connection_set_input_callback (GstRtmpConnection * sc,
 static void gst_rtmp_connection_call_input_callback (GstRtmpConnection * sc);
 static void gst_rtmp_connection_chunk_callback (GstRtmpConnection * sc);
 static void gst_rtmp_connection_start_output (GstRtmpConnection * sc);
-static void
-gst_rtmp_connection_handle_pcm (GstRtmpConnection * connection,
+static void gst_rtmp_connection_handle_psm (GstRtmpConnection * connection,
     GstRtmpChunk * chunk);
-static void
-gst_rtmp_connection_handle_user_control (GstRtmpConnection * connectin,
+static void gst_rtmp_connection_handle_cm (GstRtmpConnection * connection,
+    GstRtmpChunk * chunk);
+static void gst_rtmp_connection_handle_user_control (GstRtmpConnection * sc,
     guint32 event_type, guint32 event_data);
 static void gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc,
     GstRtmpChunk * chunk);
@@ -637,39 +637,12 @@ static void
 gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
 {
   if (chunk->chunk_stream_id == GST_RTMP_CHUNK_STREAM_PROTOCOL) {
-    GST_DEBUG ("got protocol control message, type: %d",
-        chunk->message_type_id);
-    gst_rtmp_connection_handle_pcm (sc, chunk);
+    gst_rtmp_connection_handle_psm (sc, chunk);
+    gst_rtmp_chunk_free (chunk);
+  } else if (chunk->message_type_id == GST_RTMP_MESSAGE_TYPE_COMMAND) {
+    gst_rtmp_connection_handle_cm (sc, chunk);
     gst_rtmp_chunk_free (chunk);
   } else {
-    if (chunk->message_type_id == GST_RTMP_MESSAGE_TYPE_COMMAND) {
-      CommandCallback *cb = NULL;
-      GList *g;
-      char *command_name;
-      double transaction_id;
-      GstAmfNode *command_object;
-      GstAmfNode *optional_args;
-
-      gst_rtmp_chunk_parse_message (chunk, &command_name, &transaction_id,
-          &command_object, &optional_args);
-      for (g = sc->command_callbacks; g; g = g_list_next (g)) {
-        cb = g->data;
-        if (cb->chunk_stream_id == chunk->chunk_stream_id &&
-            cb->transaction_id == transaction_id) {
-          break;
-        }
-      }
-      if (cb) {
-        sc->command_callbacks = g_list_remove (sc->command_callbacks, cb);
-        cb->func (sc, chunk, command_name, transaction_id, command_object,
-            optional_args, cb->user_data);
-        g_free (cb);
-      }
-      g_free (command_name);
-      gst_amf_node_free (command_object);
-      if (optional_args)
-        gst_amf_node_free (optional_args);
-    }
     GST_LOG ("got chunk: %" G_GSIZE_FORMAT " bytes", chunk->message_length);
     if (sc->chunk_handler_callback) {
       sc->chunk_handler_callback (sc, chunk,
@@ -681,7 +654,7 @@ gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
 }
 
 static void
-gst_rtmp_connection_handle_pcm (GstRtmpConnection * connection,
+gst_rtmp_connection_handle_psm (GstRtmpConnection * connection,
     GstRtmpChunk * chunk)
 {
   const guint8 *data;
@@ -689,6 +662,7 @@ gst_rtmp_connection_handle_pcm (GstRtmpConnection * connection,
   guint32 moo;
   guint32 moo2;
   data = g_bytes_get_data (chunk->payload, &size);
+  GST_DEBUG ("got stream protocol message %d", chunk->message_type_id);
   switch (chunk->message_type_id) {
     case GST_RTMP_MESSAGE_TYPE_SET_CHUNK_SIZE:
       moo = GST_READ_UINT32_BE (data);
@@ -726,10 +700,46 @@ gst_rtmp_connection_handle_pcm (GstRtmpConnection * connection,
       }
       break;
     default:
-      GST_ERROR ("unimplemented protocol control, type %d",
+      GST_ERROR ("unimplemented protocol stream message type %d",
           chunk->message_type_id);
       break;
   }
+}
+
+static void
+gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstRtmpChunk * chunk)
+{
+  CommandCallback *cb = NULL;
+  GList *g;
+  gchar *command_name;
+  gdouble transaction_id;
+  GstAmfNode *command_object;
+  GstAmfNode *optional_args;
+
+  gst_rtmp_chunk_parse_message (chunk, &command_name, &transaction_id,
+      &command_object, &optional_args);
+
+  GST_DEBUG ("got control message \"%s\" transaction %.0f size %"
+      G_GSIZE_FORMAT, GST_STR_NULL (command_name), transaction_id,
+      chunk->message_length);
+
+  for (g = sc->command_callbacks; g; g = g_list_next (g)) {
+    cb = g->data;
+    if (cb->chunk_stream_id == chunk->chunk_stream_id &&
+        cb->transaction_id == transaction_id) {
+      break;
+    }
+  }
+  if (cb) {
+    sc->command_callbacks = g_list_remove (sc->command_callbacks, cb);
+    cb->func (sc, chunk, command_name, transaction_id, command_object,
+        optional_args, cb->user_data);
+    g_free (cb);
+  }
+  g_free (command_name);
+  gst_amf_node_free (command_object);
+  if (optional_args)
+    gst_amf_node_free (optional_args);
 }
 
 static void
