@@ -108,6 +108,7 @@ static TaskData *
 task_data_new (const GstRtmpLocation * location)
 {
   TaskData *data = g_slice_new (TaskData);
+  data->auth_query = NULL;
   gst_rtmp_location_copy (&data->location, location);
   return data;
 }
