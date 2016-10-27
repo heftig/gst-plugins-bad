@@ -224,6 +224,7 @@ socket_connect_done (GObject * source, GAsyncResult * result,
 
   rtmp_connection = gst_rtmp_connection_new (socket_connection);
   gst_rtmp_connection_start_handshake (rtmp_connection, FALSE);
+  g_object_unref (socket_connection);
 
   send_connect (task, rtmp_connection);
   g_object_unref (rtmp_connection);

@@ -178,7 +178,7 @@ gst_rtmp_connection_set_socket_connection (GstRtmpConnection * sc,
 
   sc->thread = g_thread_self ();
   sc->main_context = g_main_context_ref_thread_default ();
-  sc->connection = connection;
+  sc->connection = g_object_ref (connection);
 
   /* refs the socket because it's creating an input stream, which holds a ref */
   is = g_io_stream_get_input_stream (G_IO_STREAM (sc->connection));
