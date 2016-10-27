@@ -34,10 +34,6 @@ GST_DEBUG_CATEGORY_STATIC (gst_rtmp_connection_debug_category);
 
 /* prototypes */
 
-static void gst_rtmp_connection_set_property (GObject * object,
-    guint property_id, const GValue * value, GParamSpec * pspec);
-static void gst_rtmp_connection_get_property (GObject * object,
-    guint property_id, GValue * value, GParamSpec * pspec);
 static void gst_rtmp_connection_dispose (GObject * object);
 static void gst_rtmp_connection_finalize (GObject * object);
 static void gst_rtmp_connection_got_closed (GstRtmpConnection * connection);
@@ -105,8 +101,6 @@ gst_rtmp_connection_class_init (GstRtmpConnectionClass * klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
-  gobject_class->set_property = gst_rtmp_connection_set_property;
-  gobject_class->get_property = gst_rtmp_connection_get_property;
   gobject_class->dispose = gst_rtmp_connection_dispose;
   gobject_class->finalize = gst_rtmp_connection_finalize;
 
@@ -125,36 +119,6 @@ gst_rtmp_connection_init (GstRtmpConnection * rtmpconnection)
   rtmpconnection->out_chunk_size = 128;
 
   rtmpconnection->input_bytes = g_byte_array_sized_new (8192);
-}
-
-void
-gst_rtmp_connection_set_property (GObject * object, guint property_id,
-    const GValue * value, GParamSpec * pspec)
-{
-  GstRtmpConnection *rtmpconnection = GST_RTMP_CONNECTION (object);
-
-  GST_DEBUG_OBJECT (rtmpconnection, "set_property");
-
-  switch (property_id) {
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
-      break;
-  }
-}
-
-void
-gst_rtmp_connection_get_property (GObject * object, guint property_id,
-    GValue * value, GParamSpec * pspec)
-{
-  GstRtmpConnection *rtmpconnection = GST_RTMP_CONNECTION (object);
-
-  GST_DEBUG_OBJECT (rtmpconnection, "get_property");
-
-  switch (property_id) {
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
-      break;
-  }
 }
 
 void
@@ -954,16 +918,6 @@ gst_rtmp_connection_client_handshake2_done (GObject * obj,
   }
 
   gst_rtmp_connection_start_output (sc);
-}
-
-void
-gst_rtmp_connection_dump (GstRtmpConnection * connection)
-{
-  g_print ("  output_queue: %d\n",
-      g_async_queue_length (connection->output_queue));
-  g_print ("  input_bytes: %u\n", connection->input_bytes->len);
-  g_print ("  needed: %" G_GSIZE_FORMAT "\n", connection->input_needed_bytes);
-
 }
 
 int
