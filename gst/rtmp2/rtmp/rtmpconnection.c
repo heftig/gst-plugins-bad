@@ -381,7 +381,7 @@ gst_rtmp_connection_output_ready (GOutputStream * os, gpointer user_data)
     }
     sc->output_chunk = chunk;
 
-    entry = gst_rtmp_chunk_cache_get (sc->input_chunk_cache,
+    entry = gst_rtmp_chunk_cache_get (sc->output_chunk_cache,
         chunk->chunk_stream_id);
 
     sc->output_bytes = gst_rtmp_chunk_serialize (chunk,
