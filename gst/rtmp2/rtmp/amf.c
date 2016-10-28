@@ -25,6 +25,9 @@
 #include <gst/gst.h>
 
 #include "amf.h"
+#include "rtmpdebug.h"
+
+#define MAX_RECURSION_DEPTH 16
 
 typedef struct _AmfObjectField AmfObjectField;
 struct _AmfObjectField
@@ -40,6 +43,7 @@ struct _AmfParser
   gsize size;
   int offset;
   gboolean error;
+  guint8 recursion_depth;
 };
 
 typedef struct _AmfSerializer AmfSerializer;
@@ -141,6 +145,11 @@ _parse_number (AmfParser * parser)
   double d;
   int i;
   guint8 *d_ptr = (guint8 *) & d;
+  if (parser->offset + 8 > parser->size) {
+    GST_ERROR ("number too long");
+    parser->error = TRUE;
+    return 0.0;
+  }
   for (i = 0; i < 8; i++) {
     d_ptr[i] = parser->data[parser->offset + (7 - i)];
   }
@@ -209,7 +218,8 @@ _parse_ecma_array (AmfParser * parser, GstAmfNode * node)
     gst_amf_object_append_take (node, s, child_node);
     g_free (s);
   }
-  _parse_u24 (parser);
+//  _parse_u24 (parser); //did nothing except advance offset
+  parser->offset += 3;
 }
 
 static GstAmfNode *
@@ -221,7 +231,16 @@ _parse_value (AmfParser * parser)
   type = _parse_u8 (parser);
   node = gst_amf_node_new (type);
 
+  parser->recursion_depth++;
+
+  if (parser->recursion_depth > MAX_RECURSION_DEPTH) {
+    GST_ERROR ("maximum recursion depth %d reached, ignore node",
+        parser->recursion_depth);
+    return node;
+  }
+
   GST_DEBUG ("parsing type %d", type);
+
 
   switch (type) {
     case GST_AMF_TYPE_NUMBER:
@@ -251,6 +270,8 @@ _parse_value (AmfParser * parser)
       break;
   }
 
+  parser->recursion_depth--;
+
   return node;
 }
 
@@ -262,6 +283,8 @@ gst_amf_node_new_parse (const guint8 * data, gsize size, gsize * n_bytes)
 
   parser->data = data;
   parser->size = size;
+  parser->error = FALSE;
+  parser->recursion_depth = 0;
   node = _parse_value (parser);
 
   if (n_bytes)
