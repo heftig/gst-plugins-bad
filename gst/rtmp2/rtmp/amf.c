@@ -68,7 +68,7 @@ gst_amf_node_new (GstAmfType type)
 {
   GstAmfNode *node;
 
-  node = g_malloc0 (sizeof (GstAmfNode));
+  node = g_slice_alloc0 (sizeof (GstAmfNode));
   node->type = type;
   if (node->type == GST_AMF_TYPE_OBJECT ||
       node->type == GST_AMF_TYPE_ECMA_ARRAY) {
@@ -89,7 +89,7 @@ gst_amf_node_free (GstAmfNode * node)
     g_ptr_array_free (node->array_val, TRUE);
   }
 
-  g_free (node);
+  g_slice_free (GstAmfNode, node);
 }
 
 static guint8
@@ -318,7 +318,7 @@ gst_amf_object_append_take (GstAmfNode * node, const gchar * s,
   g_return_if_fail (node->type == GST_AMF_TYPE_OBJECT ||
       node->type == GST_AMF_TYPE_ECMA_ARRAY);
 
-  field = g_malloc0 (sizeof (AmfObjectField));
+  field = g_slice_alloc0 (sizeof (AmfObjectField));
   field->name = g_strdup (s);
   field->value = child_node;
   g_ptr_array_add (node->array_val, field);
@@ -329,7 +329,7 @@ amf_object_field_free (AmfObjectField * field)
 {
   g_free (field->name);
   gst_amf_node_free (field->value);
-  g_free (field);
+  g_slice_free (AmfObjectField, field);
 }
 
 void
