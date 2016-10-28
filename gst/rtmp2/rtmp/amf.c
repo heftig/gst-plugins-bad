@@ -32,7 +32,7 @@
 typedef struct _AmfObjectField AmfObjectField;
 struct _AmfObjectField
 {
-  char *name;
+  gchar *name;
   GstAmfNode *value;
 };
 
@@ -41,7 +41,7 @@ struct _AmfParser
 {
   const guint8 *data;
   gsize size;
-  int offset;
+  gsize offset;
   gboolean error;
   guint8 recursion_depth;
 };
@@ -51,7 +51,7 @@ struct _AmfSerializer
 {
   guint8 *data;
   gsize size;
-  int offset;
+  gsize offset;
   gboolean error;
 };
 
@@ -92,58 +92,38 @@ gst_amf_node_free (GstAmfNode * node)
   g_free (node);
 }
 
-static int
+static guint8
 _parse_u8 (AmfParser * parser)
 {
-  int x;
+  guint8 x;
   x = parser->data[parser->offset];
   parser->offset++;
   return x;
 }
 
-static int
+static guint16
 _parse_u16 (AmfParser * parser)
 {
-  int x;
+  guint16 x;
   x = GST_READ_UINT16_BE (parser->data + parser->offset);
   parser->offset += 2;
   return x;
 }
 
-static int
-_parse_u24 (AmfParser * parser)
-{
-  int x;
-  x = GST_READ_UINT24_BE (parser->data + parser->offset);
-  parser->offset += 3;
-  return x;
-}
-
-static int
+static guint32
 _parse_u32 (AmfParser * parser)
 {
-  int x;
+  guint32 x;
   x = GST_READ_UINT32_BE (parser->data + parser->offset);
   parser->offset += 4;
   return x;
 }
 
-#if 0
-static guint8 *
-_parse_array (AmfParser * parser, int size)
-{
-  guint8 *data;
-  data = g_memdup (parser->data + parser->offset, size);
-  parser->offset += size;
-  return data;
-}
-#endif
-
 static double
 _parse_number (AmfParser * parser)
 {
-  double d;
-  int i;
+  gdouble d;
+  gint i;
   guint8 *d_ptr = (guint8 *) & d;
   if (parser->offset + 8 > parser->size) {
     GST_ERROR ("number too long");
@@ -157,11 +137,11 @@ _parse_number (AmfParser * parser)
   return d;
 }
 
-static char *
+static gchar *
 _parse_utf8_string (AmfParser * parser)
 {
   gsize size;
-  char *s;
+  gchar *s;
 
   size = _parse_u16 (parser);
   if (parser->offset + size > parser->size) {
@@ -179,7 +159,7 @@ static void
 _parse_object (AmfParser * parser, GstAmfNode * node)
 {
   while (1) {
-    char *s;
+    gchar *s;
     GstAmfNode *child_node;
     s = _parse_utf8_string (parser);
     child_node = _parse_value (parser);
@@ -196,8 +176,8 @@ _parse_object (AmfParser * parser, GstAmfNode * node)
 static void
 _parse_ecma_array (AmfParser * parser, GstAmfNode * node)
 {
-  int n_elements;
-  int i;
+  guint32 n_elements;
+  guint32 i;
 
   n_elements = _parse_u32 (parser);
 
@@ -211,14 +191,15 @@ _parse_ecma_array (AmfParser * parser, GstAmfNode * node)
     n_elements++;
 
   for (i = 0; i < n_elements; i++) {
-    char *s;
+    gchar *s;
     GstAmfNode *child_node;
     s = _parse_utf8_string (parser);
     child_node = _parse_value (parser);
     gst_amf_object_append_take (node, s, child_node);
     g_free (s);
   }
-//  _parse_u24 (parser); //did nothing except advance offset
+
+  // skip 3 bytes object-end-type
   parser->offset += 3;
 }
 
@@ -300,21 +281,21 @@ gst_amf_node_set_boolean (GstAmfNode * node, gboolean val)
 }
 
 void
-gst_amf_node_set_number (GstAmfNode * node, double val)
+gst_amf_node_set_number (GstAmfNode * node, gdouble val)
 {
   g_return_if_fail (node->type == GST_AMF_TYPE_NUMBER);
   node->double_val = val;
 }
 
 void
-gst_amf_node_set_string (GstAmfNode * node, const char *s)
+gst_amf_node_set_string (GstAmfNode * node, const gchar * s)
 {
   g_return_if_fail (node->type == GST_AMF_TYPE_STRING);
   node->string_val = g_strdup (s);
 }
 
 void
-gst_amf_node_set_string_take (GstAmfNode * node, char *s)
+gst_amf_node_set_string_take (GstAmfNode * node, gchar * s)
 {
   g_return_if_fail (node->type == GST_AMF_TYPE_STRING);
   node->string_val = s;
@@ -329,7 +310,7 @@ gst_amf_node_set_binary_string_take (GstAmfNode * node, guint8 * s, gsize size)
 }
 
 void
-gst_amf_object_append_take (GstAmfNode * node, const char *s,
+gst_amf_object_append_take (GstAmfNode * node, const gchar * s,
     GstAmfNode * child_node)
 {
   AmfObjectField *field;
@@ -352,15 +333,15 @@ amf_object_field_free (AmfObjectField * field)
 }
 
 void
-gst_amf_node_set_ecma_array (GstAmfNode * node, guint8 * data, int size)
+gst_amf_node_set_ecma_array (GstAmfNode * node, guint8 * data, guint32 size)
 {
   node->string_val = (char *) data;
   node->int_val = size;
 }
 
 void
-gst_amf_object_set_number (GstAmfNode * node, const char *field_name,
-    double val)
+gst_amf_object_set_number (GstAmfNode * node, const gchar * field_name,
+    gdouble val)
 {
   GstAmfNode *child_node;
 
@@ -370,8 +351,8 @@ gst_amf_object_set_number (GstAmfNode * node, const char *field_name,
 }
 
 void
-gst_amf_object_set_string_take (GstAmfNode * node, const char *field_name,
-    char *s)
+gst_amf_object_set_string_take (GstAmfNode * node, const gchar * field_name,
+    gchar * s)
 {
   GstAmfNode *child_node;
 
@@ -381,17 +362,17 @@ gst_amf_object_set_string_take (GstAmfNode * node, const char *field_name,
 }
 
 void
-gst_amf_object_set_string (GstAmfNode * node, const char *field_name,
-    const char *s)
+gst_amf_object_set_string (GstAmfNode * node, const gchar * field_name,
+    const gchar * s)
 {
   gst_amf_object_set_string_take (node, field_name, g_strdup (s));
 }
 
 
 static void
-_gst_amf_node_dump (GstAmfNode * node, int indent)
+_gst_amf_node_dump (GstAmfNode * node, guint indent)
 {
-  int i;
+  guint i;
 
   switch (node->type) {
     case GST_AMF_TYPE_NUMBER:
@@ -406,7 +387,7 @@ _gst_amf_node_dump (GstAmfNode * node, int indent)
     case GST_AMF_TYPE_OBJECT:
     case GST_AMF_TYPE_ECMA_ARRAY:
       g_print ("{\n");
-      for (i = 0; i < (int) node->array_val->len; i++) {
+      for (i = 0; i < gst_amf_node_get_object_length (node); i++) {
         AmfObjectField *field = g_ptr_array_index (node->array_val, i);
         g_print ("%*.*s  \"%s\": ", indent, indent, "", field->name);
         _gst_amf_node_dump (field->value, indent + 2);
@@ -445,7 +426,7 @@ _serialize_check (AmfSerializer * serializer, gsize value)
 }
 
 static void
-_serialize_u8 (AmfSerializer * serializer, int value)
+_serialize_u8 (AmfSerializer * serializer, guint8 value)
 {
   if (_serialize_check (serializer, 1)) {
     serializer->data[serializer->offset] = value;
@@ -454,7 +435,7 @@ _serialize_u8 (AmfSerializer * serializer, int value)
 }
 
 static void
-_serialize_u16 (AmfSerializer * serializer, int value)
+_serialize_u16 (AmfSerializer * serializer, guint16 value)
 {
   if (_serialize_check (serializer, 2)) {
     GST_WRITE_UINT16_BE (serializer->data + serializer->offset, value);
@@ -462,19 +443,8 @@ _serialize_u16 (AmfSerializer * serializer, int value)
   }
 }
 
-#if 0
 static void
-_serialize_u24 (AmfSerializer * serializer, int value)
-{
-  if (_serialize_check (serializer, 3)) {
-    GST_WRITE_UINT24_BE (serializer->data + serializer->offset, value);
-    serializer->offset += 3;
-  }
-}
-#endif
-
-static void
-_serialize_u32 (AmfSerializer * serializer, int value)
+_serialize_u32 (AmfSerializer * serializer, guint32 value)
 {
   if (_serialize_check (serializer, 4)) {
     GST_WRITE_UINT32_BE (serializer->data + serializer->offset, value);
@@ -483,11 +453,11 @@ _serialize_u32 (AmfSerializer * serializer, int value)
 }
 
 static void
-_serialize_number (AmfSerializer * serializer, double value)
+_serialize_number (AmfSerializer * serializer, gdouble value)
 {
   if (_serialize_check (serializer, 8)) {
     guint8 *d_ptr = (guint8 *) & value;
-    int i;
+    gsize i;
 
     for (i = 0; i < 8; i++) {
       serializer->data[serializer->offset + i] = d_ptr[7 - i];
@@ -497,9 +467,9 @@ _serialize_number (AmfSerializer * serializer, double value)
 }
 
 static void
-_serialize_utf8_string (AmfSerializer * serializer, const char *s)
+_serialize_utf8_string (AmfSerializer * serializer, const gchar * s)
 {
-  int size;
+  guint16 size;
 
   size = strlen (s);
   if (_serialize_check (serializer, 2 + size)) {
@@ -512,9 +482,9 @@ _serialize_utf8_string (AmfSerializer * serializer, const char *s)
 static void
 _serialize_object (AmfSerializer * serializer, GstAmfNode * node)
 {
-  int i;
+  guint i;
 
-  for (i = 0; i < (int) node->array_val->len; i++) {
+  for (i = 0; i < gst_amf_node_get_object_length (node); i++) {
     AmfObjectField *field = g_ptr_array_index (node->array_val, i);
     _serialize_utf8_string (serializer, field->name);
     _serialize_value (serializer, field->value);
@@ -526,10 +496,10 @@ _serialize_object (AmfSerializer * serializer, GstAmfNode * node)
 static void
 _serialize_ecma_array (AmfSerializer * serializer, GstAmfNode * node)
 {
-  int i;
+  guint i;
 
   _serialize_u32 (serializer, 0);
-  for (i = 0; i < (int) node->array_val->len; i++) {
+  for (i = 0; i < gst_amf_node_get_object_length (node); i++) {
     AmfObjectField *field = g_ptr_array_index (node->array_val, i);
     _serialize_utf8_string (serializer, field->name);
     _serialize_value (serializer, field->value);
@@ -574,7 +544,7 @@ _serialize_value (AmfSerializer * serializer, GstAmfNode * node)
 }
 
 GBytes *
-gst_amf_serialize_command (const char *command_name, int transaction_id,
+gst_amf_serialize_command (const gchar * command_name, gdouble transaction_id,
     GstAmfNode * command_object, GstAmfNode * optional_args)
 {
   AmfSerializer _s = { 0 }, *serializer = &_s;
@@ -599,7 +569,7 @@ gst_amf_serialize_command (const char *command_name, int transaction_id,
 }
 
 GBytes *
-gst_amf_serialize_command2 (const char *command_name, int transaction_id,
+gst_amf_serialize_command2 (const gchar * command_name, gdouble transaction_id,
     GstAmfNode * command_object, GstAmfNode * optional_args, GstAmfNode * n3,
     GstAmfNode * n4)
 {
@@ -647,16 +617,16 @@ gst_amf_node_get_number (const GstAmfNode * node)
 }
 
 const GstAmfNode *
-gst_amf_node_get_object (const GstAmfNode * node, const char *field_name)
+gst_amf_node_get_object (const GstAmfNode * node, const gchar * field_name)
 {
-  int i;
+  guint i;
 
   if (!node->array_val) {
     GST_WARNING ("tried to access array of non-object node");
     return NULL;
   }
 
-  for (i = 0; i < (int) node->array_val->len; i++) {
+  for (i = 0; i < gst_amf_node_get_object_length (node); i++) {
     AmfObjectField *field = g_ptr_array_index (node->array_val, i);
     if (strcmp (field->name, field_name) == 0) {
       return field->value;
@@ -665,14 +635,14 @@ gst_amf_node_get_object (const GstAmfNode * node, const char *field_name)
   return NULL;
 }
 
-int
+guint
 gst_amf_node_get_object_length (const GstAmfNode * node)
 {
   return node->array_val->len;
 }
 
 const GstAmfNode *
-gst_amf_node_get_object_by_index (const GstAmfNode * node, int i)
+gst_amf_node_get_object_by_index (const GstAmfNode * node, guint i)
 {
   AmfObjectField *field;
   field = g_ptr_array_index (node->array_val, i);

@@ -49,9 +49,9 @@ typedef enum {
 
 struct _GstAmfNode {
   GstAmfType type;
-  int int_val;
-  double double_val;
-  char *string_val;
+  guint32 int_val;
+  gdouble double_val;
+  gchar *string_val;
   GPtrArray *array_val;
 };
 typedef struct _GstAmfNode GstAmfNode;
@@ -64,32 +64,32 @@ GstAmfNode * gst_amf_node_new_parse (const guint8 *data, gsize size,
     gsize *n_bytes);
 
 void gst_amf_node_set_boolean (GstAmfNode *node, gboolean val);
-void gst_amf_node_set_number (GstAmfNode *node, double val);
-void gst_amf_node_set_string (GstAmfNode *node, const char *s);
+void gst_amf_node_set_number (GstAmfNode *node, gdouble val);
+void gst_amf_node_set_string (GstAmfNode *node, const gchar *s);
 void gst_amf_node_set_binary_string_take (GstAmfNode *node, guint8 *s, gsize size);
-void gst_amf_node_set_string_take (GstAmfNode *node, char *s);
-void gst_amf_node_set_ecma_array (GstAmfNode *node, guint8 *data, int size);
-void gst_amf_object_append_take (GstAmfNode *node, const char *s,
+void gst_amf_node_set_string_take (GstAmfNode *node, gchar *s);
+void gst_amf_node_set_ecma_array (GstAmfNode *node, guint8 *data, guint size);
+void gst_amf_object_append_take (GstAmfNode *node, const gchar *s,
     GstAmfNode *child_node);
 
 gboolean gst_amf_node_get_boolean (const GstAmfNode *node);
-const char *gst_amf_node_get_string (const GstAmfNode *node);
+const gchar *gst_amf_node_get_string (const GstAmfNode *node);
 double gst_amf_node_get_number (const GstAmfNode *node);
-const GstAmfNode *gst_amf_node_get_object (const GstAmfNode *node, const char *field_name);
-int gst_amf_node_get_object_length (const GstAmfNode *node);
-const GstAmfNode *gst_amf_node_get_object_by_index (const GstAmfNode *node, int i);
+const GstAmfNode *gst_amf_node_get_object (const GstAmfNode *node, const gchar *field_name);
+guint gst_amf_node_get_object_length (const GstAmfNode *node);
+const GstAmfNode *gst_amf_node_get_object_by_index (const GstAmfNode *node, guint i);
 
 void gst_amf_object_set_number (GstAmfNode *node, const char *field_name,
-    double val);
+    gdouble val);
 void gst_amf_object_set_string_take (GstAmfNode *node, const char *field_name,
-    char *s);
+    gchar *s);
 void gst_amf_object_set_string (GstAmfNode *node, const char *field_name,
-    const char *s);
+    const gchar *s);
 
 GBytes * gst_amf_serialize_command (const char *command_name,
-    int transaction_id, GstAmfNode *command_object, GstAmfNode *optional_args);
+    gdouble transaction_id, GstAmfNode *command_object, GstAmfNode *optional_args);
 GBytes * gst_amf_serialize_command2 (const char *command_name,
-    int transaction_id, GstAmfNode *command_object, GstAmfNode *optional_args,
+    gdouble transaction_id, GstAmfNode *command_object, GstAmfNode *optional_args,
     GstAmfNode *n3, GstAmfNode *n4);
 
 G_END_DECLS
