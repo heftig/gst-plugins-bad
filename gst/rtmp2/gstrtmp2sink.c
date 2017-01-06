@@ -502,7 +502,7 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
     ret = GST_FLOW_OK;
   } else {
     GST_ERROR_OBJECT (rtmp2sink, "connection missing");
-    g_object_unref (chunk);
+    gst_rtmp_chunk_free (chunk);
   }
   g_mutex_unlock (&rtmp2sink->lock);
 
