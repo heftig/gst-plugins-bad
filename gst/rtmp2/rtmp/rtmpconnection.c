@@ -282,15 +282,18 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
   g_byte_array_set_size (sc->input_bytes, oldsize + (ret > 0 ? ret : 0));
 
   if (ret < 0) {
-    if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT)) {
+    gint code = error->code;
+
+    if (error->domain == G_IO_ERROR && (code == G_IO_ERROR_WOULD_BLOCK ||
+            code == G_IO_ERROR_TIMED_OUT || code == G_IO_ERROR_AGAIN)) {
       /* should retry */
-      GST_DEBUG ("timeout, continuing");
+      GST_DEBUG ("read IO error %d %s, continuing", code, error->message);
       g_error_free (error);
       return G_SOURCE_CONTINUE;
     }
 
     GST_ERROR ("read error: %s %d %s", g_quark_to_string (error->domain),
-        error->code, error->message);
+        code, error->message);
     g_error_free (error);
   }
 
