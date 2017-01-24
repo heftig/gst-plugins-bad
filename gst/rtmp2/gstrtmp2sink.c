@@ -739,7 +739,14 @@ publish_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
       const GstAmfNode *node = gst_amf_node_get_object (optional_args, "code");
       const gchar *code = node ? gst_amf_node_get_string (node) : NULL;
 
-      if (g_str_equal (code, "NetStream.Publish.Denied")) {
+      if (g_str_equal (code, "NetStream.Publish.Start")) {
+        GST_DEBUG_OBJECT (rtmp2sink, "publish success, code=%s", code);
+        g_task_return_pointer (task, g_object_ref (connection),
+            gst_rtmp_connection_close_and_unref);
+      } else if (g_str_equal (code, "NetStream.Publish.BadName")) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_EXISTS,
+            "Stream already exists! (%s)", code);
+      } else if (g_str_equal (code, "NetStream.Publish.Denied")) {
         g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
             "Publish denied! (%s)", code);
       } else {
