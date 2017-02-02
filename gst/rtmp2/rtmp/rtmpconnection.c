@@ -1002,7 +1002,7 @@ gst_rtmp_connection_send_ack (GstRtmpConnection * connection)
   chunk = gst_rtmp_chunk_new ();
   chunk->chunk_stream_id = 2;
   chunk->timestamp = 0;
-  chunk->message_type_id = 5;
+  chunk->message_type_id = GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT;
   chunk->stream_id = 0;
 
   data = g_malloc (4);
@@ -1025,13 +1025,13 @@ gst_rtmp_connection_send_ping_response (GstRtmpConnection * connection,
   chunk = gst_rtmp_chunk_new ();
   chunk->chunk_stream_id = 2;
   chunk->timestamp = 0;
-  chunk->message_type_id = 4;
+  chunk->message_type_id = GST_RTMP_MESSAGE_TYPE_USER_CONTROL;
   chunk->stream_id = 0;
 
-  data = g_malloc (8);
-  GST_WRITE_UINT32_BE (data, 7);
-  GST_WRITE_UINT32_BE (data + 4, event_data);
-  chunk->payload = g_bytes_new_take (data, 8);
+  data = g_malloc (6);
+  GST_WRITE_UINT16_BE (data, GST_RTMP_USER_CONTROL_PING_RESPONSE);
+  GST_WRITE_UINT32_BE (data + 2, event_data);
+  chunk->payload = g_bytes_new_take (data, 6);
   chunk->message_length = g_bytes_get_size (chunk->payload);
 
   gst_rtmp_connection_queue_chunk (connection, chunk);
@@ -1046,7 +1046,7 @@ gst_rtmp_connection_send_window_size_request (GstRtmpConnection * connection)
   chunk = gst_rtmp_chunk_new ();
   chunk->chunk_stream_id = 2;
   chunk->timestamp = 0;
-  chunk->message_type_id = 5;
+  chunk->message_type_id = GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE;
   chunk->stream_id = 0;
 
   data = g_malloc (4);
