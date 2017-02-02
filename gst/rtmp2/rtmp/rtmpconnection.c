@@ -738,6 +738,8 @@ gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
   g_return_if_fail (GST_IS_RTMP_CONNECTION (connection));
   g_return_if_fail (chunk);
 
+  GST_LOG ("queuing chunk: stream %" G_GUINT32_FORMAT ", message type %d",
+      chunk->stream_id, chunk->message_type_id);
   g_async_queue_push (connection->output_queue, chunk);
   gst_rtmp_connection_start_output (connection);
 }
