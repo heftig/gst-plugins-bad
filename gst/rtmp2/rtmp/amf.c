@@ -221,8 +221,7 @@ _parse_value (AmfParser * parser)
     return node;
   }
 
-  GST_DEBUG ("parsing type %d", type);
-
+  GST_LOG ("parsing AMF type %d", type);
 
   switch (type) {
     case GST_AMF_TYPE_NUMBER:
