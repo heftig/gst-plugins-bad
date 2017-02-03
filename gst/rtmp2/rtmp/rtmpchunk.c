@@ -113,7 +113,7 @@ gst_rtmp_chunk_parse_header (GstRtmpChunkHeader * header, const guint8 * data,
   header->message_type_id = previous_header->message_type_id;
   header->stream_id = previous_header->stream_id;
 
-  payload_start = msg_header_start + header->header_size;
+  payload_start = data + header->header_size;
 
   switch (header->format) {
     case 0:
