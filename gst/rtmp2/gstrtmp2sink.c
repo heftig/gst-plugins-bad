@@ -39,6 +39,11 @@
 
 #include "gstrtmp2sink.h"
 
+#include "gstrtmp2locationhandler.h"
+#include "rtmp/rtmpchunk.h"
+#include "rtmp/rtmpclient.h"
+#include "rtmp/rtmputils.h"
+
 #include <gst/gst.h>
 #include <gst/base/gstbasesink.h>
 #include <string.h>
@@ -47,6 +52,36 @@ GST_DEBUG_CATEGORY_STATIC (gst_rtmp2_sink_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp2_sink_debug_category
 
 /* prototypes */
+#define GST_RTMP2_SINK(obj)   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_RTMP2_SINK,GstRtmp2Sink))
+#define GST_RTMP2_SINK_CLASS(klass)   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_RTMP2_SINK,GstRtmp2SinkClass))
+#define GST_IS_RTMP2_SINK(obj)   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_RTMP2_SINK))
+#define GST_IS_RTMP2_SINK_CLASS(obj)   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_RTMP2_SINK)
+typedef struct _GstRtmp2Sink GstRtmp2Sink;
+typedef struct _GstRtmp2SinkClass GstRtmp2SinkClass;
+
+struct _GstRtmp2Sink
+{
+  GstBaseSink parent_instance;
+
+  /* properties */
+  GstRtmpLocation location;
+
+  /* stuff */
+  GMutex lock;
+  GCond cond;
+  gboolean flushing;
+  GstTask *task;
+  GRecMutex task_lock;
+  GMainLoop *task_main_loop;
+
+  GTask *connect_task;
+  GstRtmpConnection *connection;
+};
+
+struct _GstRtmp2SinkClass
+{
+  GstBaseSinkClass parent_class;
+};
 
 /* GObject virtual functions */
 static void gst_rtmp2_sink_set_property (GObject * object,

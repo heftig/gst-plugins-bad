@@ -22,45 +22,11 @@
 
 #define _GST_RTMP2_SINK_H_
 
-#include "gstrtmp2locationhandler.h"
-
-#include <gst/base/gstbasesink.h>
-#include <rtmp/rtmpclient.h>
-#include <rtmp/rtmputils.h>
+#include <gst/gst.h>
 
 G_BEGIN_DECLS
+
 #define GST_TYPE_RTMP2_SINK   (gst_rtmp2_sink_get_type())
-#define GST_RTMP2_SINK(obj)   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_RTMP2_SINK,GstRtmp2Sink))
-#define GST_RTMP2_SINK_CLASS(klass)   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_RTMP2_SINK,GstRtmp2SinkClass))
-#define GST_IS_RTMP2_SINK(obj)   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_RTMP2_SINK))
-#define GST_IS_RTMP2_SINK_CLASS(obj)   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_RTMP2_SINK))
-typedef struct _GstRtmp2Sink GstRtmp2Sink;
-typedef struct _GstRtmp2SinkClass GstRtmp2SinkClass;
-
-struct _GstRtmp2Sink
-{
-  GstBaseSink base_rtmp2sink;
-
-  /* properties */
-  GstRtmpLocation location;
-
-  /* stuff */
-  GMutex lock;
-  GCond cond;
-  gboolean flushing;
-  GstTask *task;
-  GRecMutex task_lock;
-  GMainLoop *task_main_loop;
-
-  GTask *connect_task;
-  GstRtmpConnection *connection;
-};
-
-struct _GstRtmp2SinkClass
-{
-  GstBaseSinkClass base_rtmp2sink_class;
-};
-
 GType gst_rtmp2_sink_get_type (void);
 
 G_END_DECLS
