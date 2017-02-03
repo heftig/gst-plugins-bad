@@ -129,8 +129,6 @@ gst_rtmp_chunk_parse_header (GstRtmpChunkHeader * header, const guint8 * data,
       header->timestamp_rel = GST_READ_UINT24_BE (msg_header_start);
 
       if (header->timestamp_rel == 0xffffff) {
-        GST_FIXME ("untested extended timestamp");
-
         header->header_size += 4;
         if (size < header->header_size) {
           GST_LOG ("not enough bytes to read extended timestamp");
