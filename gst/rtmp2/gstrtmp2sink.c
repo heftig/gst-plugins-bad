@@ -73,6 +73,7 @@ struct _GstRtmp2Sink
   GstTask *task;
   GRecMutex task_lock;
   GMainLoop *task_main_loop;
+  GPtrArray *headers;
 
   GTask *connect_task;
   GstRtmpConnection *connection;
@@ -98,6 +99,7 @@ static gboolean gst_rtmp2_sink_unlock (GstBaseSink * sink);
 static gboolean gst_rtmp2_sink_unlock_stop (GstBaseSink * sink);
 static GstFlowReturn gst_rtmp2_sink_render (GstBaseSink * sink,
     GstBuffer * buffer);
+static gboolean gst_rtmp2_sink_set_caps (GstBaseSink * sink, GstCaps * caps);
 
 /* Internal API */
 static void gst_rtmp2_sink_task (gpointer user_data);
@@ -174,6 +176,7 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
   base_sink_class->unlock = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_unlock);
   base_sink_class->unlock_stop = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_unlock_stop);
   base_sink_class->render = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_render);
+  base_sink_class->set_caps = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_set_caps);
 
   g_object_class_override_property (gobject_class, PROP_LOCATION, "location");
   g_object_class_override_property (gobject_class, PROP_HOST, "host");
@@ -200,6 +203,7 @@ gst_rtmp2_sink_init (GstRtmp2Sink * rtmp2sink)
   rtmp2sink->task = gst_task_new (gst_rtmp2_sink_task, rtmp2sink, NULL);
   g_rec_mutex_init (&rtmp2sink->task_lock);
   gst_task_set_lock (rtmp2sink->task, &rtmp2sink->task_lock);
+  rtmp2sink->headers = g_ptr_array_new_with_free_func (gst_rtmp_chunk_free);
 }
 
 static void
@@ -354,6 +358,7 @@ gst_rtmp2_sink_finalize (GObject * object)
   /* clean up object here */
   g_clear_object (&rtmp2sink->connect_task);
   g_clear_object (&rtmp2sink->connection);
+  g_clear_pointer (&rtmp2sink->headers, g_ptr_array_unref);
   gst_rtmp_location_clear (&rtmp2sink->location);
   g_clear_object (&rtmp2sink->task);
   g_rec_mutex_clear (&rtmp2sink->task_lock);
@@ -391,6 +396,9 @@ gst_rtmp2_sink_stop (GstBaseSink * sink)
   if (rtmp2sink->task_main_loop) {
     g_main_loop_quit (rtmp2sink->task_main_loop);
   }
+
+  g_ptr_array_set_size (rtmp2sink->headers, 0);
+
   g_mutex_unlock (&rtmp2sink->lock);
 
   gst_task_join (rtmp2sink->task);
@@ -527,6 +535,45 @@ unmap:
   return ret;
 }
 
+static gboolean
+should_drop_header (GstRtmp2Sink * self, GstBuffer * buffer)
+{
+  guint len;
+
+  if (G_LIKELY (!GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_HEADER))) {
+    return FALSE;
+  }
+
+  g_mutex_lock (&self->lock);
+  len = self->headers->len;
+  g_mutex_unlock (&self->lock);
+
+  /* Drop header buffers when we have streamheader caps */
+  return len > 0;
+}
+
+static void
+send_streamheader (GstRtmp2Sink * self)
+{
+  guint i;
+
+  if (G_LIKELY (self->headers->len == 0)) {
+    return;
+  }
+
+  GST_DEBUG_OBJECT (self, "Sending %u streamheader chunks", self->headers->len);
+
+  for (i = 0; i < self->headers->len; i++) {
+    gst_rtmp_connection_queue_chunk (self->connection,
+        g_ptr_array_index (self->headers, i));
+  }
+
+  /* Steal pointers: suppress free */
+  g_ptr_array_set_free_func (self->headers, NULL);
+  g_ptr_array_set_size (self->headers, 0);
+  g_ptr_array_set_free_func (self->headers, gst_rtmp_chunk_free);
+}
+
 static GstFlowReturn
 send_chunk (GstRtmp2Sink * self, GstRtmpChunk * chunk)
 {
@@ -545,6 +592,7 @@ send_chunk (GstRtmp2Sink * self, GstRtmpChunk * chunk)
     goto out;
   }
 
+  send_streamheader (self);
   gst_rtmp_connection_queue_chunk (self->connection, chunk);
   ret = GST_FLOW_OK;
 
@@ -559,6 +607,11 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
   GstRtmpChunk *chunk;
 
+  if (G_UNLIKELY (should_drop_header (self, buffer))) {
+    GST_DEBUG_OBJECT (self, "Skipping header %" GST_PTR_FORMAT, buffer);
+    return GST_FLOW_OK;
+  }
+
   GST_LOG_OBJECT (self, "render %" GST_PTR_FORMAT, buffer);
 
   if (G_UNLIKELY (!buffer_to_chunk (buffer, &chunk))) {
@@ -572,6 +625,52 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   }
 
   return send_chunk (self, chunk);
+}
+
+static const GArray *
+caps_get_streamheader (GstCaps * caps)
+{
+  GstStructure *s = gst_caps_get_structure (caps, 0);
+  const GValue *v = gst_structure_get_value (s, "streamheader");
+  return v ? g_value_peek_pointer (v) : NULL;
+}
+
+static gboolean
+gst_rtmp2_sink_set_caps (GstBaseSink * sink, GstCaps * caps)
+{
+  GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
+  const GArray *streamheader;
+  guint i;
+
+  GST_DEBUG_OBJECT (self, "setcaps %" GST_PTR_FORMAT, caps);
+
+  g_ptr_array_set_size (self->headers, 0);
+
+  streamheader = caps_get_streamheader (caps);
+  for (i = 0; i < streamheader->len; i++) {
+    GstBuffer *buffer =
+        g_value_peek_pointer (&g_array_index (streamheader, GValue, i));
+    GstRtmpChunk *chunk;
+
+    if (!buffer_to_chunk (buffer, &chunk)) {
+      GST_ERROR_OBJECT (self, "Failed to read streamheader %" GST_PTR_FORMAT,
+          buffer);
+      return FALSE;
+    }
+
+    if (!chunk) {
+      GST_DEBUG_OBJECT (self, "Skipping streamheader %" GST_PTR_FORMAT, buffer);
+      continue;
+    }
+
+    GST_DEBUG_OBJECT (self, "Adding streamheader %" GST_PTR_FORMAT, buffer);
+    g_ptr_array_add (self->headers, chunk);
+  }
+
+  GST_DEBUG_OBJECT (self, "Collected streamheaders: %u buffers -> %u chunks",
+      i, self->headers->len);
+
+  return TRUE;
 }
 
 /* Mainloop task */
