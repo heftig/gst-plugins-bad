@@ -528,39 +528,50 @@ unmap:
 }
 
 static GstFlowReturn
+send_chunk (GstRtmp2Sink * self, GstRtmpChunk * chunk)
+{
+  GstFlowReturn ret;
+
+  g_mutex_lock (&self->lock);
+
+  while (G_UNLIKELY (!self->connection && !self->flushing)) {
+    GST_DEBUG_OBJECT (self, "waiting for connection");
+    g_cond_wait (&self->cond, &self->lock);
+  }
+
+  if (G_UNLIKELY (!self->connection || self->flushing)) {
+    gst_rtmp_chunk_free (chunk);
+    ret = self->flushing ? GST_FLOW_FLUSHING : GST_FLOW_ERROR;
+    goto out;
+  }
+
+  gst_rtmp_connection_queue_chunk (self->connection, chunk);
+  ret = GST_FLOW_OK;
+
+out:
+  g_mutex_unlock (&self->lock);
+  return ret;
+}
+
+static GstFlowReturn
 gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
+  GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
   GstRtmpChunk *chunk;
-  GstFlowReturn ret = GST_FLOW_OK;
 
-  GST_LOG_OBJECT (rtmp2sink, "render %" GST_PTR_FORMAT, buffer);
+  GST_LOG_OBJECT (self, "render %" GST_PTR_FORMAT, buffer);
 
   if (G_UNLIKELY (!buffer_to_chunk (buffer, &chunk))) {
-    GST_ERROR_OBJECT (rtmp2sink, "Failed to read %" GST_PTR_FORMAT, buffer);
+    GST_ERROR_OBJECT (self, "Failed to read %" GST_PTR_FORMAT, buffer);
     return GST_FLOW_ERROR;
   }
 
   if (G_UNLIKELY (!chunk)) {
-    GST_DEBUG_OBJECT (rtmp2sink, "Skipping %" GST_PTR_FORMAT, buffer);
+    GST_DEBUG_OBJECT (self, "Skipping %" GST_PTR_FORMAT, buffer);
     return GST_FLOW_OK;
   }
 
-  g_mutex_lock (&rtmp2sink->lock);
-  while (G_UNLIKELY (!rtmp2sink->connection && !rtmp2sink->flushing)) {
-    GST_DEBUG_OBJECT (rtmp2sink, "waiting for connection");
-    g_cond_wait (&rtmp2sink->cond, &rtmp2sink->lock);
-  }
-
-  if (G_LIKELY (rtmp2sink->connection && !rtmp2sink->flushing)) {
-    gst_rtmp_connection_queue_chunk (rtmp2sink->connection, chunk);
-  } else {
-    gst_rtmp_chunk_free (chunk);
-    ret = rtmp2sink->flushing ? GST_FLOW_FLUSHING : GST_FLOW_ERROR;
-  }
-  g_mutex_unlock (&rtmp2sink->lock);
-
-  return ret;
+  return send_chunk (self, chunk);
 }
 
 /* Mainloop task */
