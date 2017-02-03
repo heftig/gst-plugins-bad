@@ -96,8 +96,6 @@ static gboolean gst_rtmp2_sink_start (GstBaseSink * sink);
 static gboolean gst_rtmp2_sink_stop (GstBaseSink * sink);
 static gboolean gst_rtmp2_sink_unlock (GstBaseSink * sink);
 static gboolean gst_rtmp2_sink_unlock_stop (GstBaseSink * sink);
-static GstFlowReturn gst_rtmp2_sink_preroll (GstBaseSink * sink,
-    GstBuffer * buffer);
 static GstFlowReturn gst_rtmp2_sink_render (GstBaseSink * sink,
     GstBuffer * buffer);
 
@@ -175,7 +173,6 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
   base_sink_class->stop = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_stop);
   base_sink_class->unlock = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_unlock);
   base_sink_class->unlock_stop = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_unlock_stop);
-  base_sink_class->preroll = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_preroll);
   base_sink_class->render = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_render);
 
   g_object_class_override_property (gobject_class, PROP_LOCATION, "location");
@@ -432,23 +429,6 @@ gst_rtmp2_sink_unlock_stop (GstBaseSink * sink)
   return TRUE;
 }
 
-static GstFlowReturn
-gst_rtmp2_sink_preroll (GstBaseSink * sink, GstBuffer * buffer)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
-
-  GST_DEBUG_OBJECT (rtmp2sink, "preroll");
-
-  g_mutex_lock (&rtmp2sink->lock);
-  while (!rtmp2sink->flushing && !rtmp2sink->connection) {
-    GST_DEBUG_OBJECT (rtmp2sink, "waiting for connection");
-    g_cond_wait (&rtmp2sink->cond, &rtmp2sink->lock);
-  }
-  g_mutex_unlock (&rtmp2sink->lock);
-
-  return rtmp2sink->connection ? GST_FLOW_OK : GST_FLOW_FLUSHING;
-}
-
 static gboolean
 buffer_to_chunk (GstBuffer * buffer, GstRtmpChunk ** chunkp)
 {
@@ -567,12 +547,16 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   }
 
   g_mutex_lock (&rtmp2sink->lock);
-  if (G_LIKELY (rtmp2sink->connection)) {
+  while (G_UNLIKELY (!rtmp2sink->connection && !rtmp2sink->flushing)) {
+    GST_DEBUG_OBJECT (rtmp2sink, "waiting for connection");
+    g_cond_wait (&rtmp2sink->cond, &rtmp2sink->lock);
+  }
+
+  if (G_LIKELY (rtmp2sink->connection && !rtmp2sink->flushing)) {
     gst_rtmp_connection_queue_chunk (rtmp2sink->connection, chunk);
   } else {
-    GST_ERROR_OBJECT (rtmp2sink, "connection missing");
     gst_rtmp_chunk_free (chunk);
-    ret = GST_FLOW_ERROR;
+    ret = rtmp2sink->flushing ? GST_FLOW_FLUSHING : GST_FLOW_ERROR;
   }
   g_mutex_unlock (&rtmp2sink->lock);
 
