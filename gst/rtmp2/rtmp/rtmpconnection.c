@@ -1030,7 +1030,7 @@ gst_rtmp_connection_send_ping_response (GstRtmpConnection * connection,
 
   data = g_malloc (6);
   GST_WRITE_UINT16_BE (data, GST_RTMP_USER_CONTROL_PING_RESPONSE);
-  GST_WRITE_UINT32_BE (data + 4, event_data);
+  GST_WRITE_UINT32_BE (data + 2, event_data);
   chunk->payload = g_bytes_new_take (data, 6);
   chunk->message_length = g_bytes_get_size (chunk->payload);
 
