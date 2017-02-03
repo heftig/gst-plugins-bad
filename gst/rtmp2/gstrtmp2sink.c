@@ -437,8 +437,11 @@ gst_rtmp2_sink_preroll (GstBaseSink * sink, GstBuffer * buffer)
 {
   GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
 
+  GST_DEBUG_OBJECT (rtmp2sink, "preroll");
+
   g_mutex_lock (&rtmp2sink->lock);
   while (!rtmp2sink->flushing && !rtmp2sink->connection) {
+    GST_DEBUG_OBJECT (rtmp2sink, "waiting for connection");
     g_cond_wait (&rtmp2sink->cond, &rtmp2sink->lock);
   }
   g_mutex_unlock (&rtmp2sink->lock);
