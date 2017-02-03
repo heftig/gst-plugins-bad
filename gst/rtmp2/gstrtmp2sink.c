@@ -449,34 +449,34 @@ gst_rtmp2_sink_preroll (GstBaseSink * sink, GstBuffer * buffer)
   return rtmp2sink->connection ? GST_FLOW_OK : GST_FLOW_FLUSHING;
 }
 
-static GstFlowReturn
-gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
+static gboolean
+buffer_to_chunk (GstBuffer * buffer, GstRtmpChunk ** chunkp)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
-  GstRtmpChunk *chunk;
+  GstRtmpChunk *chunk = NULL;
+  gboolean ret = FALSE;
   GstMapInfo info;
-  GstFlowReturn ret = GST_FLOW_ERROR;
   guint8 *payload;
   gsize payload_size;
 
-  GST_LOG_OBJECT (rtmp2sink, "render %" GST_PTR_FORMAT, buffer);
+  *chunkp = NULL;
 
-  if (!gst_buffer_map (buffer, &info, GST_MAP_READ)) {
-    GST_ERROR_OBJECT (rtmp2sink, "map failed: %" GST_PTR_FORMAT, buffer);
-    goto out;
+  if (G_UNLIKELY (!gst_buffer_map (buffer, &info, GST_MAP_READ))) {
+    GST_ERROR ("map failed: %" GST_PTR_FORMAT, buffer);
+    return FALSE;
   }
 
   /* FIXME: This is ugly and only works behind flvmux.
    *        Implement true RTMP muxing. */
 
-  if (info.size >= 4 && memcmp (info.data, "FLV", 3) == 0) {
+  if (G_UNLIKELY (info.size >= 4 && memcmp (info.data, "FLV", 3) == 0)) {
     /* drop the header, we don't need it */
-    ret = GST_FLOW_OK;
+    GST_DEBUG ("ignoring FLV header: %" GST_PTR_FORMAT, buffer);
+    ret = TRUE;
     goto unmap;
   }
 
-  if (info.size < 11 + 4) {
-    GST_ERROR_OBJECT (rtmp2sink, "too small: %" GST_PTR_FORMAT, buffer);
+  if (G_UNLIKELY (info.size < 11 + 4)) {
+    GST_ERROR ("too small: %" GST_PTR_FORMAT, buffer);
     goto unmap;
   }
 
@@ -491,8 +491,8 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   chunk->timestamp |= GST_READ_UINT8 (info.data + 7) << 24;
   chunk->stream_id = 1;
 
-  if (chunk->message_length != payload_size) {
-    GST_ERROR_OBJECT (rtmp2sink, "message length mismatch %" G_GSIZE_FORMAT
+  if (G_UNLIKELY (chunk->message_length != payload_size)) {
+    GST_ERROR ("message length mismatch %" G_GSIZE_FORMAT
         " <> %" GST_PTR_FORMAT, chunk->message_length, buffer);
     goto unmap;
   }
@@ -530,24 +530,52 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
       break;
 
     default:
-      GST_ERROR_OBJECT (rtmp2sink, "unknown tag type %d",
-          chunk->message_type_id);
+      GST_ERROR ("unknown tag type %d", chunk->message_type_id);
       goto unmap;
   }
 
+  *chunkp = chunk;
+  chunk = NULL;
+  ret = TRUE;
+
+unmap:
+  if (G_UNLIKELY (chunk)) {
+    gst_rtmp_chunk_free (chunk);
+  }
+
+  gst_buffer_unmap (buffer, &info);
+  return ret;
+}
+
+static GstFlowReturn
+gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
+{
+  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
+  GstRtmpChunk *chunk;
+  GstFlowReturn ret = GST_FLOW_OK;
+
+  GST_LOG_OBJECT (rtmp2sink, "render %" GST_PTR_FORMAT, buffer);
+
+  if (G_UNLIKELY (!buffer_to_chunk (buffer, &chunk))) {
+    GST_ERROR_OBJECT (rtmp2sink, "Failed to read %" GST_PTR_FORMAT, buffer);
+    return GST_FLOW_ERROR;
+  }
+
+  if (G_UNLIKELY (!chunk)) {
+    GST_DEBUG_OBJECT (rtmp2sink, "Skipping %" GST_PTR_FORMAT, buffer);
+    return GST_FLOW_OK;
+  }
+
   g_mutex_lock (&rtmp2sink->lock);
-  if (rtmp2sink->connection) {
+  if (G_LIKELY (rtmp2sink->connection)) {
     gst_rtmp_connection_queue_chunk (rtmp2sink->connection, chunk);
-    ret = GST_FLOW_OK;
   } else {
     GST_ERROR_OBJECT (rtmp2sink, "connection missing");
     gst_rtmp_chunk_free (chunk);
+    ret = GST_FLOW_ERROR;
   }
   g_mutex_unlock (&rtmp2sink->lock);
 
-unmap:
-  gst_buffer_unmap (buffer, &info);
-out:
   return ret;
 }
 
