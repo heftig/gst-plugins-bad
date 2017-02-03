@@ -620,8 +620,10 @@ new_connect (GstRtmp2Sink * rtmp2sink)
   rtmp2sink->connect_task =
       g_task_new (rtmp2sink, cancellable, connect_task_done, NULL);
 
+  GST_OBJECT_LOCK (rtmp2sink);
   gst_rtmp_client_connect_async (&rtmp2sink->location,
       cancellable, client_connect_done, rtmp2sink->connect_task);
+  GST_OBJECT_UNLOCK (rtmp2sink);
 
   g_object_unref (cancellable);
 }
@@ -714,7 +716,11 @@ send_create_stream (GTask * task)
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
+
+  GST_OBJECT_LOCK (rtmp2sink);
   gst_amf_node_set_string (node2, rtmp2sink->location.stream);
+  GST_OBJECT_UNLOCK (rtmp2sink);
+
   gst_rtmp_connection_send_command (connection, 3,
       "releaseStream", 2, node, node2, NULL, NULL);
   gst_amf_node_free (node);
@@ -722,7 +728,11 @@ send_create_stream (GTask * task)
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
+
+  GST_OBJECT_LOCK (rtmp2sink);
   gst_amf_node_set_string (node2, rtmp2sink->location.stream);
+  GST_OBJECT_UNLOCK (rtmp2sink);
+
   gst_rtmp_connection_send_command (connection, 3, "FCPublish", 3,
       node, node2, NULL, NULL);
   gst_amf_node_free (node);
