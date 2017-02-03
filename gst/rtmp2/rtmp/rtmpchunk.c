@@ -177,13 +177,6 @@ select_message_header_fmt (GstRtmpChunk * chunk,
     return 0;
   }
 
-  if (previous_header->timestamp_abs > *timestamp) {
-    GST_DEBUG ("picking chunk header 0: timestamp regression; "
-        "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
-        previous_header->timestamp_abs, *timestamp);
-    return 0;
-  }
-
   *timestamp -= previous_header->timestamp_abs;
   *ext_ts = (*timestamp > 0xfffffe);
 
