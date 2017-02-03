@@ -543,8 +543,10 @@ new_connect (GstRtmp2Src * rtmp2src)
   rtmp2src->connect_task =
       g_task_new (rtmp2src, cancellable, connect_task_done, NULL);
 
+  GST_OBJECT_LOCK (rtmp2src);
   gst_rtmp_client_connect_async (&rtmp2src->location,
       cancellable, client_connect_done, rtmp2src->connect_task);
+  GST_OBJECT_UNLOCK (rtmp2src);
 
   g_object_unref (cancellable);
 }
@@ -716,7 +718,11 @@ send_play (GTask * task)
 
   node = gst_amf_node_new (GST_AMF_TYPE_NULL);
   node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
+
+  GST_OBJECT_LOCK (rtmp2src);
   gst_amf_node_set_string (node2, rtmp2src->location.stream);
+  GST_OBJECT_UNLOCK (rtmp2src);
+
   node3 = gst_amf_node_new (GST_AMF_TYPE_NUMBER);
   gst_amf_node_set_number (node3, 0);
   gst_rtmp_connection_send_command2 (connection, 8, 1, "play", 3, node,
