@@ -161,12 +161,8 @@ gst_rtmp_client_connect_async (const GstRtmpLocation * location,
 
   if (g_once_init_enter (&auth_regex)) {
     GRegex *re = g_regex_new ("\\[ *AccessManager.Reject *\\] *: *"
-        "\\[ *authmod=adobe *\\] *: *"
-        "\\?reason=needauth"
-        "&user=(?<user>.*?)"
-        "&salt=(?<salt>.*?)"
-        "&challenge=(?<challenge>.*?)"
-        "&opaque=(?<opaque>.*?)\\Z", G_REGEX_DOTALL, 0, NULL);
+        "\\[ *authmod=(?<authmod>.*?) *\\] *: *"
+        "(?<query>\\?.*)\\Z", G_REGEX_DOTALL, 0, NULL);
     g_warn_if_fail (re);
 
     GST_DEBUG_CATEGORY_INIT (gst_rtmp_client_debug_category,
@@ -376,8 +372,10 @@ send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
   }
 
   if (g_str_equal (code, "NetConnection.Connect.Rejected")) {
+    GstRtmpAuthmod authmod = data->location.authmod;
     GMatchInfo *match_info;
     const gchar *desc;
+    GstUri *query;
 
     node = gst_amf_node_get_object (optional_args, "description");
     if (!node) {
@@ -390,76 +388,106 @@ send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
     desc = gst_amf_node_get_string (node);
     GST_DEBUG ("connect result desc: %s", GST_STR_NULL (desc));
 
-    if (g_strrstr (desc, "code=403 need auth; authmod=adobe")) {
-      GST_INFO ("server requires adobe style auth mode");
-
-      if (!(data->location.authmod == GST_RTMP_AUTHMOD_AUTO ||
-              data->location.authmod == GST_RTMP_AUTHMOD_ADOBE)) {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-            "adobe style auth required, but incompatible auth mode selected");
-        g_object_unref (task);
-        return;
-      }
-      if (!data->location.username || !data->location.username[0] ||
-          !data->location.password || !data->location.password[0]) {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-            "adobe style auth required, but no credentials supplied");
-        g_object_unref (task);
+    if (authmod == GST_RTMP_AUTHMOD_AUTO && strstr (desc, "code=403 need auth")) {
+      if (strstr (desc, "authmod=adobe")) {
+        data->location.authmod = GST_RTMP_AUTHMOD_ADOBE;
+        gst_rtmp_connection_close (connection);
+        socket_connect (task);
         return;
       }
 
-      data->location.authmod = GST_RTMP_AUTHMOD_ADOBE;
-      gst_rtmp_connection_close (connection);
-      socket_connect (task);
-      return;
-    }
-
-    if (g_strrstr (desc, "?reason=authfailed")) {
       g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-          "authentication failed! wrong credentials?");
+          "unhandled authentication mode: %s", desc);
       g_object_unref (task);
       return;
     }
 
-    if (g_regex_match (auth_regex, desc, 0, &match_info)) {
-      const gchar *username = data->location.username;
-      const gchar *password = data->location.password;
-      gchar *salt = g_match_info_fetch_named (match_info, "salt");
-      gchar *challenge = g_match_info_fetch_named (match_info, "challenge");
-      gchar *opaque = g_match_info_fetch_named (match_info, "opaque");
-
-      g_match_info_free (match_info);
-
-      GST_INFO
-          ("regex parsed auth... user='%s', salt='%s', challenge='%s', opaque='%s'",
-          GST_STR_NULL (data->location.username), GST_STR_NULL (salt),
-          GST_STR_NULL (challenge), GST_STR_NULL (opaque));
-
-      g_warn_if_fail (data->location.authmod == GST_RTMP_AUTHMOD_ADOBE);
-      data->location.authmod = GST_RTMP_AUTHMOD_ADOBE;
-
-      g_warn_if_fail (!data->auth_query);
-      data->auth_query =
-          do_adobe_auth (username, password, salt, opaque, challenge);
-      g_free (salt);
-      g_free (opaque);
-      g_free (challenge);
-
-      if (!data->auth_query) {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-            "couldn't generate adobe style authentication query");
-        g_object_unref (task);
-        return;
-      }
-
-      gst_rtmp_connection_close (connection);
-      socket_connect (task);
+    if (!g_regex_match (auth_regex, desc, 0, &match_info)) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+          "failed to parse auth rejection: %s", desc);
+      g_object_unref (task);
       return;
     }
 
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-        "unhandled auth rejection: %s", GST_STR_NULL (desc));
-    g_object_unref (task);
+    {
+      gchar *authmod_str = g_match_info_fetch_named (match_info, "authmod");
+      gchar *query_str = g_match_info_fetch_named (match_info, "query");
+      gboolean matches;
+
+      GST_INFO ("regex parsed auth: authmod=%s, query=%s",
+          GST_STR_NULL (authmod_str), GST_STR_NULL (query_str));
+      g_match_info_free (match_info);
+
+      switch (authmod) {
+        case GST_RTMP_AUTHMOD_ADOBE:
+          matches = g_str_equal (authmod_str, "adobe");
+          break;
+
+        default:
+          matches = FALSE;
+          break;
+      }
+
+      if (!matches) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "server uses wrong authentication mode '%s'; expected %s",
+            GST_STR_NULL (authmod_str), gst_rtmp_authmod_get_nick (authmod));
+        g_object_unref (task);
+        g_free (authmod_str);
+        g_free (query_str);
+        return;
+      }
+      g_free (authmod_str);
+
+      query = gst_uri_from_string (query_str);
+      if (!query) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "failed to parse authentication query '%s'",
+            GST_STR_NULL (query_str));
+        g_object_unref (task);
+        g_free (query_str);
+        return;
+      }
+      g_free (query_str);
+    }
+
+    {
+      const gchar *reason = gst_uri_get_query_value (query, "reason");
+
+      if (g_str_equal (reason, "authfailed")) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "authentication failed! wrong credentials?");
+        g_object_unref (task);
+        gst_uri_unref (query);
+        return;
+      }
+
+      if (!g_str_equal (reason, "needauth")) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+            "unhandled rejection reason '%s'", reason ? reason : "");
+        g_object_unref (task);
+        gst_uri_unref (query);
+        return;
+      }
+    }
+
+    g_warn_if_fail (!data->auth_query);
+    data->auth_query = do_adobe_auth (data->location.username,
+        data->location.password, gst_uri_get_query_value (query, "salt"),
+        gst_uri_get_query_value (query, "opaque"),
+        gst_uri_get_query_value (query, "challenge"));
+
+    gst_uri_unref (query);
+
+    if (!data->auth_query) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+          "couldn't generate adobe style authentication query");
+      g_object_unref (task);
+      return;
+    }
+
+    gst_rtmp_connection_close (connection);
+    socket_connect (task);
     return;
   }
 
