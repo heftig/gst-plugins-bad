@@ -144,6 +144,14 @@ gst_rtmp_authmod_get_type (void)
   return (GType) authmod_type;
 }
 
+static const gchar *
+gst_rtmp_authmod_get_nick (GstRtmpAuthmod value)
+{
+  GEnumClass *klass = g_type_class_peek (GST_TYPE_RTMP_AUTHMOD);
+  GEnumValue *ev = klass ? g_enum_get_value (klass, value) : NULL;
+  return ev ? ev->value_nick : "(unknown)";
+}
+
 void
 gst_rtmp_client_connect_async (const GstRtmpLocation * location,
     GCancellable * cancellable, GAsyncReadyCallback callback,
