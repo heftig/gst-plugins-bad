@@ -241,6 +241,8 @@ _parse_value (AmfParser * parser)
       break;
     case GST_AMF_TYPE_NULL:
       break;
+    case GST_AMF_TYPE_UNDEFINED:
+      break;
     case GST_AMF_TYPE_ECMA_ARRAY:
       _parse_ecma_array (parser, node);
       break;
@@ -401,6 +403,9 @@ _gst_amf_node_dump (GstAmfNode * node, guint indent)
     case GST_AMF_TYPE_NULL:
       g_print ("Null");
       break;
+    case GST_AMF_TYPE_UNDEFINED:
+      g_print ("Undefined");
+      break;
     case GST_AMF_TYPE_OBJECT_END:
       break;
     default:
@@ -530,6 +535,8 @@ _serialize_value (AmfSerializer * serializer, GstAmfNode * node)
       serializer->error = TRUE;
       break;
     case GST_AMF_TYPE_NULL:
+      break;
+    case GST_AMF_TYPE_UNDEFINED:
       break;
     case GST_AMF_TYPE_ECMA_ARRAY:
       _serialize_ecma_array (serializer, node);
