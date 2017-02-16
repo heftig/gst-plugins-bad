@@ -43,6 +43,8 @@ static void send_connect_done (GstRtmpConnection * connection,
     gpointer user_data);
 static void send_secure_token_response (GTask * task,
     GstRtmpConnection * connection, const gchar * challenge);
+static void connection_attempt_closed (GstRtmpConnection * connection,
+    gpointer user_data);
 
 void
 gst_rtmp_location_copy (GstRtmpLocation * dest, const GstRtmpLocation * src)
@@ -103,6 +105,8 @@ typedef struct
 {
   GstRtmpLocation location;
   gchar *auth_query;
+  GstRtmpConnection *connection;
+  gulong id_connection_closed_cb;
 } TaskData;
 
 static TaskData *
@@ -111,6 +115,8 @@ task_data_new (const GstRtmpLocation * location)
   TaskData *data = g_slice_new (TaskData);
   data->auth_query = NULL;
   gst_rtmp_location_copy (&data->location, location);
+  data->connection = NULL;
+  data->id_connection_closed_cb = 0;
   return data;
 }
 
@@ -120,6 +126,11 @@ task_data_free (gpointer ptr)
   TaskData *data = ptr;
   gst_rtmp_location_clear (&data->location);
   g_clear_pointer (&data->auth_query, g_free);
+  if (data->id_connection_closed_cb) {
+    g_signal_handler_disconnect (data->connection,
+        data->id_connection_closed_cb);
+  }
+  g_object_unref (data->connection);
   g_slice_free (TaskData, data);
 }
 
@@ -205,6 +216,7 @@ socket_connect_done (GObject * source, GAsyncResult * result,
 {
   GSocketClient *socket_client = G_SOCKET_CLIENT (source);
   GTask *task = user_data;
+  TaskData *data = g_task_get_task_data (task);
   GError *error = NULL;
   GSocketConnection *socket_connection;
   GstRtmpConnection *rtmp_connection;
@@ -228,11 +240,24 @@ socket_connect_done (GObject * source, GAsyncResult * result,
   }
 
   rtmp_connection = gst_rtmp_connection_new (socket_connection);
+
+  data->connection = g_object_ref (rtmp_connection);
+  data->id_connection_closed_cb = g_signal_connect_object (rtmp_connection,
+      "closed", G_CALLBACK (connection_attempt_closed), task, 0);
+
   gst_rtmp_connection_start_handshake (rtmp_connection, FALSE);
   g_object_unref (socket_connection);
 
   send_connect (task, rtmp_connection);
   g_object_unref (rtmp_connection);
+}
+
+static void
+connection_attempt_closed (GstRtmpConnection * connection, gpointer user_data)
+{
+  GTask *task = user_data;
+  g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_CLOSED,
+      "read error during connection attempt");
 }
 
 static gchar *
@@ -500,8 +525,8 @@ static void
 send_secure_token_response (GTask * task, GstRtmpConnection * connection,
     const gchar * challenge)
 {
+  TaskData *data = g_task_get_task_data (task);
   if (challenge) {
-    TaskData *data = g_task_get_task_data (task);
     GstAmfNode *node1;
     GstAmfNode *node2;
     gchar *response;
@@ -525,6 +550,11 @@ send_secure_token_response (GTask * task, GstRtmpConnection * connection,
         "secureTokenResponse", 0, node1, node2, NULL, NULL);
     gst_amf_node_free (node1);
     gst_amf_node_free (node2);
+  }
+
+  if (data->id_connection_closed_cb) {
+    g_signal_handler_disconnect (connection, data->id_connection_closed_cb);
+    data->id_connection_closed_cb = 0;
   }
 
   g_task_return_pointer (task, g_object_ref (connection),
