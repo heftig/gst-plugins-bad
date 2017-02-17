@@ -586,9 +586,9 @@ send_chunk (GstRtmp2Sink * self, GstRtmpChunk * chunk)
     g_cond_wait (&self->cond, &self->lock);
   }
 
-  if (G_UNLIKELY (!self->connection || self->flushing)) {
+  if (G_UNLIKELY (self->flushing)) {
     gst_rtmp_chunk_free (chunk);
-    ret = self->flushing ? GST_FLOW_FLUSHING : GST_FLOW_ERROR;
+    ret = GST_FLOW_FLUSHING;
     goto out;
   }
 
