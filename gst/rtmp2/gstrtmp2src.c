@@ -594,17 +594,13 @@ static void
 connection_closed (GstRtmpConnection * connection, GstRtmp2Src * rtmp2src)
 {
   g_mutex_lock (&rtmp2src->lock);
-
   if (rtmp2src->connect_task) {
     g_cancellable_cancel (g_task_get_cancellable (rtmp2src->connect_task));
-  }
-
-  if (rtmp2src->task_main_loop) {
+  } else if (rtmp2src->task_main_loop) {
     GST_INFO_OBJECT (rtmp2src, "Connection got closed");
     gst_task_stop (rtmp2src->task);
     g_main_loop_quit (rtmp2src->task_main_loop);
   }
-
   g_mutex_unlock (&rtmp2src->lock);
 }
 
