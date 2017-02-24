@@ -67,7 +67,7 @@ struct _GstRtmp2Src
   gboolean sent_header;
   GMutex lock;
   GCond cond;
-  GQueue *queue;
+  GstRtmpChunk *chunk;
   gboolean flushing;
   GstTask *task;
   GRecMutex task_lock;
@@ -195,7 +195,6 @@ gst_rtmp2_src_init (GstRtmp2Src * rtmp2src)
   rtmp2src->task = gst_task_new (gst_rtmp2_src_task, rtmp2src, NULL);
   g_rec_mutex_init (&rtmp2src->task_lock);
   gst_task_set_lock (rtmp2src->task, &rtmp2src->task_lock);
-  rtmp2src->queue = g_queue_new ();
 }
 
 static void
@@ -355,7 +354,7 @@ gst_rtmp2_src_finalize (GObject * object)
   g_rec_mutex_clear (&rtmp2src->task_lock);
   g_mutex_clear (&rtmp2src->lock);
   g_cond_clear (&rtmp2src->cond);
-  g_queue_free_full (rtmp2src->queue, gst_rtmp_chunk_free);
+  g_clear_pointer (&rtmp2src->chunk, gst_rtmp_chunk_free);
 
   G_OBJECT_CLASS (gst_rtmp2_src_parent_class)->finalize (object);
 }
@@ -408,7 +407,7 @@ gst_rtmp2_src_unlock (GstBaseSrc * src)
 
   g_mutex_lock (&rtmp2src->lock);
   rtmp2src->flushing = TRUE;
-  g_cond_signal (&rtmp2src->cond);
+  g_cond_broadcast (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
 
   return TRUE;
@@ -448,8 +447,7 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
   GST_LOG_OBJECT (rtmp2src, "create");
 
   g_mutex_lock (&rtmp2src->lock);
-  chunk = g_queue_pop_head (rtmp2src->queue);
-  while (!chunk) {
+  while (!rtmp2src->chunk) {
     if (!rtmp2src->task_main_loop) {
       g_mutex_unlock (&rtmp2src->lock);
       return GST_FLOW_EOS;
@@ -459,8 +457,11 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
       return GST_FLOW_FLUSHING;
     }
     g_cond_wait (&rtmp2src->cond, &rtmp2src->lock);
-    chunk = g_queue_pop_head (rtmp2src->queue);
   }
+
+  chunk = rtmp2src->chunk;
+  rtmp2src->chunk = NULL;
+  g_cond_signal (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
 
   payload_data = g_bytes_get_data (chunk->payload, &payload_size);
@@ -515,7 +516,7 @@ gst_rtmp2_src_task (gpointer user_data)
   g_mutex_lock (&rtmp2src->lock);
   g_clear_pointer (&rtmp2src->task_main_loop, g_main_loop_unref);
   g_clear_pointer (&rtmp2src->connection, gst_rtmp_connection_close_and_unref);
-  g_cond_signal (&rtmp2src->cond);
+  g_cond_broadcast (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
 
   while (g_main_context_pending (main_context)) {
@@ -527,8 +528,7 @@ gst_rtmp2_src_task (gpointer user_data)
   g_main_context_unref (main_context);
 
   g_mutex_lock (&rtmp2src->lock);
-  g_queue_foreach (rtmp2src->queue, (GFunc) gst_rtmp_chunk_free, NULL);
-  g_queue_clear (rtmp2src->queue);
+  g_clear_pointer (&rtmp2src->chunk, gst_rtmp_chunk_free);
   g_mutex_unlock (&rtmp2src->lock);
 
   GST_DEBUG ("gst_rtmp2_src_task exiting");
@@ -578,7 +578,16 @@ got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
   }
 
   g_mutex_lock (&rtmp2src->lock);
-  g_queue_push_tail (rtmp2src->queue, chunk);
+  while (rtmp2src->chunk) {
+    if (rtmp2src->flushing) {
+      g_mutex_unlock (&rtmp2src->lock);
+      gst_rtmp_chunk_free (chunk);
+      return;
+    }
+    g_cond_wait (&rtmp2src->cond, &rtmp2src->lock);
+  }
+
+  rtmp2src->chunk = chunk;
   g_cond_signal (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
   return;
@@ -640,7 +649,7 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
     }
   }
 
-  g_cond_signal (&rtmp2src->cond);
+  g_cond_broadcast (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
 }
 
