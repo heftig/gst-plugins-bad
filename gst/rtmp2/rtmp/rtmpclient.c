@@ -37,9 +37,7 @@ static void socket_connect_done (GObject * source, GAsyncResult * result,
 static gchar *do_adobe_auth (const gchar * username, const gchar * password,
     const gchar * salt, const gchar * opaque, const gchar * challenge);
 static void send_connect (GTask * task, GstRtmpConnection * connection);
-static void send_connect_done (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk, const char *command_name, int transaction_id,
-    GstAmfNode * command_object, GstAmfNode * optional_args,
+static void send_connect_done (const gchar * command_name, GPtrArray * args,
     gpointer user_data);
 static void send_secure_token_response (GTask * task,
     GstRtmpConnection * connection, const gchar * challenge);
@@ -336,7 +334,7 @@ send_connect (GTask * task, GstRtmpConnection * connection)
   const gchar *app;
   gchar *uri, *appstr = NULL, *uristr = NULL;
 
-  node = gst_amf_node_new (GST_AMF_TYPE_OBJECT);
+  node = gst_amf_node_new_object ();
   app = data->location.application;
   uri = gst_rtmp_location_get_string (&data->location, FALSE);
 
@@ -354,10 +352,10 @@ send_connect (GTask * task, GstRtmpConnection * connection)
     uristr = g_strdup (uri);
   }
 
-  gst_amf_object_set_string_take (node, "app", appstr);
-  gst_amf_object_set_string_take (node, "tcUrl", uristr);
-  gst_amf_object_set_string (node, "type", "nonprivate");
-  gst_amf_object_set_string (node, "flashVer", "FMLE/3.0");
+  gst_amf_node_append_field_take_string (node, g_strdup ("app"), appstr);
+  gst_amf_node_append_field_take_string (node, g_strdup ("tcUrl"), uristr);
+  gst_amf_node_append_field_string (node, "type", "nonprivate");
+  gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0");
 
   // "fpad": False,
   // "capabilities": 15,
@@ -365,31 +363,32 @@ send_connect (GTask * task, GstRtmpConnection * connection)
   // "videoCodecs": 252,
   // "videoFunction": 1,
 
-  gst_rtmp_connection_send_command (connection, 3, "connect", 1,
-      node, NULL, send_connect_done, task);
+  gst_rtmp_connection_send_command (connection, send_connect_done, task, 0,
+      "connect", node, NULL);
 
   gst_amf_node_free (node);
   g_free (uri);
 }
 
 static void
-send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
-    const char *command_name, int transaction_id, GstAmfNode * command_object,
-    GstAmfNode * optional_args, gpointer user_data)
+send_connect_done (const gchar * command_name, GPtrArray * args,
+    gpointer user_data)
 {
   GTask *task = G_TASK (user_data);
   TaskData *data = g_task_get_task_data (task);
-  const GstAmfNode *node;
+  const GstAmfNode *node, *optional_args;
   const gchar *code;
 
-  if (!optional_args) {
+  if (args->len < 2) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
         "arguments missing from connect cmd result");
     g_object_unref (task);
     return;
   }
 
-  node = gst_amf_node_get_object (optional_args, "code");
+  optional_args = g_ptr_array_index (args, 1);
+
+  node = gst_amf_node_get_field (optional_args, "code");
   if (!node) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
         "result code missing from connect cmd result");
@@ -397,13 +396,13 @@ send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
     return;
   }
 
-  code = gst_amf_node_get_string (node);
+  code = gst_amf_node_peek_string (node);
   GST_INFO ("connect result: %s", GST_STR_NULL (code));
 
   if (g_str_equal (code, "NetConnection.Connect.Success")) {
-    node = gst_amf_node_get_object (optional_args, "secureToken");
-    send_secure_token_response (task, connection,
-        node ? gst_amf_node_get_string (node) : NULL);
+    node = gst_amf_node_get_field (optional_args, "secureToken");
+    send_secure_token_response (task, data->connection,
+        node ? gst_amf_node_peek_string (node) : NULL);
     return;
   }
 
@@ -413,7 +412,7 @@ send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
     const gchar *desc;
     GstUri *query;
 
-    node = gst_amf_node_get_object (optional_args, "description");
+    node = gst_amf_node_get_field (optional_args, "description");
     if (!node) {
       g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
           "Connect rejected; no description");
@@ -421,7 +420,7 @@ send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
       return;
     }
 
-    desc = gst_amf_node_get_string (node);
+    desc = gst_amf_node_peek_string (node);
     GST_DEBUG ("connect result desc: %s", GST_STR_NULL (desc));
 
     if (authmod == GST_RTMP_AUTHMOD_AUTO && strstr (desc, "code=403 need auth")) {
@@ -551,12 +550,10 @@ send_secure_token_response (GTask * task, GstRtmpConnection * connection,
 
     GST_DEBUG ("response: %s", response);
 
-    node1 = gst_amf_node_new (GST_AMF_TYPE_NULL);
-    node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-    gst_amf_node_set_string_take (node2, response);
-
-    gst_rtmp_connection_send_command (connection, 3,
-        "secureTokenResponse", 0, node1, node2, NULL, NULL);
+    node1 = gst_amf_node_new_null ();
+    node2 = gst_amf_node_new_take_string (response);
+    gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
+        "secureTokenResponse", node1, node2, NULL);
     gst_amf_node_free (node1);
     gst_amf_node_free (node2);
   }

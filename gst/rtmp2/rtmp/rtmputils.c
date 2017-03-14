@@ -24,35 +24,9 @@
 #include <gst/gst.h>
 
 #include "rtmputils.h"
+#include "rtmpdebug.h"
 
 #include <string.h>
-
-
-void
-gst_rtmp_dump_data (GBytes * bytes)
-{
-  const guint8 *data;
-  gsize size;
-  int i, j;
-
-  data = g_bytes_get_data (bytes, &size);
-  for (i = 0; i < (int) size; i += 16) {
-    g_print ("%04x: ", i);
-    for (j = 0; j < 16; j++) {
-      if (i + j < (int) size) {
-        g_print ("%02x ", data[i + j]);
-      } else {
-        g_print ("   ");
-      }
-    }
-    for (j = 0; j < 16; j++) {
-      if (i + j < (int) size) {
-        g_print ("%c", g_ascii_isprint (data[i + j]) ? data[i + j] : '.');
-      }
-    }
-    g_print ("\n");
-  }
-}
 
 GBytes *
 gst_rtmp_bytes_remove (GBytes * bytes, gsize size)
@@ -164,43 +138,4 @@ gst_rtmp_tea_decode (const gchar * key, const gchar * text)
   }
 
   return (gchar *) out;
-}
-
-static void
-dump_command (GstRtmpChunk * chunk)
-{
-  GstAmfNode *amf;
-  gsize size;
-  const guint8 *data;
-  gsize n_parsed;
-  int offset;
-
-  offset = 0;
-  data = g_bytes_get_data (chunk->payload, &size);
-  while (offset < (int) size) {
-    amf = gst_amf_node_new_parse (data + offset, size - offset, &n_parsed);
-    gst_amf_node_dump (amf);
-    gst_amf_node_free (amf);
-    offset += n_parsed;
-  }
-}
-
-void
-gst_rtmp_dump_chunk (GstRtmpChunk * chunk, gboolean dir, gboolean dump_message,
-    gboolean dump_data)
-{
-  g_print ("%s chunk_stream_id:%-4d ts:%-8d len:%-6" G_GSIZE_FORMAT
-      " type_id:%-4d stream_id:%08x\n", dir ? ">>>" : "<<<",
-      chunk->chunk_stream_id,
-      chunk->timestamp,
-      chunk->message_length, chunk->message_type_id, chunk->stream_id);
-  if (dump_message) {
-    if (chunk->message_type_id == GST_RTMP_MESSAGE_TYPE_COMMAND ||
-        chunk->message_type_id == GST_RTMP_MESSAGE_TYPE_DATA) {
-      dump_command (chunk);
-    }
-  }
-  if (dump_data) {
-    gst_rtmp_dump_data (chunk->payload);
-  }
 }

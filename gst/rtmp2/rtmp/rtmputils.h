@@ -27,13 +27,10 @@ G_BEGIN_DECLS
 
 #define GST_RTMP_DEFAULT_PORT 1935
 
-void gst_rtmp_dump_data (GBytes * bytes);
 GBytes *gst_rtmp_bytes_remove (GBytes *bytes, gsize size);
 gchar * gst_rtmp_hexify (const guint8 *src, gsize size);
 guint8 * gst_rtmp_unhexify (const char *src, gsize *size);
 gchar * gst_rtmp_tea_decode (const gchar *key, const gchar *text);
-void gst_rtmp_dump_chunk (GstRtmpChunk * chunk, gboolean dir,
-    gboolean dump_message, gboolean dump_data);
 
 G_END_DECLS
 
