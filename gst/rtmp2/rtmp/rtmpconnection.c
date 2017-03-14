@@ -399,36 +399,6 @@ gst_rtmp_connection_write_chunk_done (GObject * obj,
   g_object_unref (connection);
 }
 
-
-G_GNUC_UNUSED static void
-parse_message (guint8 * data, int size)
-{
-  int offset;
-  gsize bytes_read;
-  GstAmfNode *node;
-
-  offset = 4;
-
-  node = gst_amf_node_new_parse (data + offset, size - offset, &bytes_read);
-  offset += bytes_read;
-  g_print ("bytes_read: %" G_GSIZE_FORMAT "\n", bytes_read);
-  if (node)
-    gst_amf_node_free (node);
-
-  node = gst_amf_node_new_parse (data + offset, size - offset, &bytes_read);
-  offset += bytes_read;
-  g_print ("bytes_read: %" G_GSIZE_FORMAT "\n", bytes_read);
-  if (node)
-    gst_amf_node_free (node);
-
-  node = gst_amf_node_new_parse (data + offset, size - offset, &bytes_read);
-  offset += bytes_read;
-  g_print ("bytes_read: %" G_GSIZE_FORMAT "\n", bytes_read);
-  if (node)
-    gst_amf_node_free (node);
-
-}
-
 static void
 gst_rtmp_connection_take_input_bytes (GstRtmpConnection * sc, gsize size,
     GBytes ** outbytes)
