@@ -55,25 +55,6 @@ gst_rtmp_dump_data (GBytes * bytes)
 }
 
 GBytes *
-gst_rtmp_bytes_append (GBytes * bytes, guint8 * data, gsize size)
-{
-  const guint8 *data1;
-  gsize size1;
-  guint8 *outdata;
-
-  data1 = g_bytes_get_data (bytes, &size1);
-
-  outdata = g_malloc (size1 + size);
-  memcpy (outdata, data1, size1);
-  memcpy (outdata + size1, data, size);
-
-  g_free (data);
-  g_bytes_unref (bytes);
-
-  return g_bytes_new_take (outdata, size1 + size);
-}
-
-GBytes *
 gst_rtmp_bytes_remove (GBytes * bytes, gsize size)
 {
   GBytes *new_bytes;
