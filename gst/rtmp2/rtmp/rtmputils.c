@@ -98,6 +98,8 @@ gst_rtmp_unhexify (const char *src, gsize * size)
   return dest;
 }
 
+#define HEX2BIN g_ascii_xdigit_value
+
 /* taken from librtmp */
 gchar *
 gst_rtmp_tea_decode (const gchar * key, const gchar * text)
@@ -134,7 +136,6 @@ gst_rtmp_tea_decode (const gchar * key, const gchar * text)
   ptr = (unsigned char *) text;
   v = (guint32 *) out;
   for (i = 0; i < n; i++) {
-#define HEX2BIN(x) g_ascii_xdigit_value(x)
     u = (HEX2BIN (ptr[0]) << 4) + HEX2BIN (ptr[1]);
     u |= ((HEX2BIN (ptr[2]) << 4) + HEX2BIN (ptr[3])) << 8;
     u |= ((HEX2BIN (ptr[4]) << 4) + HEX2BIN (ptr[5])) << 16;
@@ -145,7 +146,6 @@ gst_rtmp_tea_decode (const gchar * key, const gchar * text)
   v = (guint32 *) out;
 
   /* http://www.movable-type.co.uk/scripts/tea-block.html */
-#define MX (((z>>5)^(y<<2)) + ((y>>3)^(z<<4))) ^ ((sum^y) + (k[(p&3)^e]^z));
   z = v[n - 1];
   y = v[0];
   q = 6 + 52 / n;
@@ -153,9 +153,13 @@ gst_rtmp_tea_decode (const gchar * key, const gchar * text)
   while (sum != 0) {
     e = sum >> 2 & 3;
     for (p = n - 1; p > 0; p--)
-      z = v[p - 1], y = v[p] -= MX;
+      z = v[p - 1], y = v[p] -=
+          (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) ^ ((sum ^ y) +
+          (k[(p & 3) ^ e] ^ z));
     z = v[n - 1];
-    y = v[0] -= MX;
+    y = v[0] -=
+        (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) ^ ((sum ^ y) +
+        (k[(p & 3) ^ e] ^ z));
     sum -= DELTA;
   }
 
