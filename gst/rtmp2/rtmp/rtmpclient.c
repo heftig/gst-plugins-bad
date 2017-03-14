@@ -200,6 +200,17 @@ socket_connect (GTask * task)
     data->location.timeout = DEFAULT_TIMEOUT;
   }
 
+  if (data->id_connection_closed_cb) {
+    g_signal_handler_disconnect (data->connection,
+        data->id_connection_closed_cb);
+    data->id_connection_closed_cb = 0;
+  }
+
+  if (data->connection) {
+    gst_rtmp_connection_close (data->connection);
+    g_clear_object (&data->connection);
+  }
+
   addr = g_network_address_new (data->location.host, data->location.port);
   socket_client = g_socket_client_new ();
   g_socket_client_set_timeout (socket_client, data->location.timeout);
@@ -416,7 +427,6 @@ send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
     if (authmod == GST_RTMP_AUTHMOD_AUTO && strstr (desc, "code=403 need auth")) {
       if (strstr (desc, "authmod=adobe")) {
         data->location.authmod = GST_RTMP_AUTHMOD_ADOBE;
-        gst_rtmp_connection_close (connection);
         socket_connect (task);
         return;
       }
@@ -511,7 +521,6 @@ send_connect_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
       return;
     }
 
-    gst_rtmp_connection_close (connection);
     socket_connect (task);
     return;
   }
@@ -552,10 +561,8 @@ send_secure_token_response (GTask * task, GstRtmpConnection * connection,
     gst_amf_node_free (node2);
   }
 
-  if (data->id_connection_closed_cb) {
-    g_signal_handler_disconnect (connection, data->id_connection_closed_cb);
-    data->id_connection_closed_cb = 0;
-  }
+  g_signal_handler_disconnect (connection, data->id_connection_closed_cb);
+  data->id_connection_closed_cb = 0;
 
   g_task_return_pointer (task, g_object_ref (connection),
       gst_rtmp_connection_close_and_unref);
