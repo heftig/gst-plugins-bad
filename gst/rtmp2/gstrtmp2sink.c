@@ -106,14 +106,10 @@ static void gst_rtmp2_sink_task (gpointer user_data);
 static void client_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
 static void send_create_stream (GTask * task);
-static void create_stream_done (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk, const char *command_name, int transaction_id,
-    GstAmfNode * command_object, GstAmfNode * optional_args,
+static void create_stream_done (const gchar * command_name, GPtrArray * args,
     gpointer user_data);
 static void send_publish (GTask * task);
-static void publish_done (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk, const char *command_name, int transaction_id,
-    GstAmfNode * command_object, GstAmfNode * optional_args,
+static void publish_done (const gchar * command_name, GPtrArray * args,
     gpointer user_data);
 static void new_connect (GstRtmp2Sink * rtmp2sink);
 static void connect_task_done (GObject * object, GAsyncResult * result,
@@ -813,45 +809,31 @@ send_create_stream (GTask * task)
   GstAmfNode *node;
   GstAmfNode *node2;
 
-  node = gst_amf_node_new (GST_AMF_TYPE_NULL);
-  node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
+  node = gst_amf_node_new_null ();
 
   GST_OBJECT_LOCK (rtmp2sink);
-  gst_amf_node_set_string (node2, rtmp2sink->location.stream);
+  node2 = gst_amf_node_new_string (rtmp2sink->location.stream);
   GST_OBJECT_UNLOCK (rtmp2sink);
 
-  gst_rtmp_connection_send_command (connection, 3,
-      "releaseStream", 2, node, node2, NULL, NULL);
-  gst_amf_node_free (node);
+  gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
+      "releaseStream", node, node2, NULL);
+  gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
+      "FCPublish", node, node2, NULL);
+  gst_rtmp_connection_send_command (connection, create_stream_done, task, 0,
+      "createStream", node, NULL);
+
   gst_amf_node_free (node2);
-
-  node = gst_amf_node_new (GST_AMF_TYPE_NULL);
-  node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-
-  GST_OBJECT_LOCK (rtmp2sink);
-  gst_amf_node_set_string (node2, rtmp2sink->location.stream);
-  GST_OBJECT_UNLOCK (rtmp2sink);
-
-  gst_rtmp_connection_send_command (connection, 3, "FCPublish", 3,
-      node, node2, NULL, NULL);
-  gst_amf_node_free (node);
-  gst_amf_node_free (node2);
-
-  node = gst_amf_node_new (GST_AMF_TYPE_NULL);
-  gst_rtmp_connection_send_command (connection, 3, "createStream",
-      4, node, NULL, create_stream_done, task);
   gst_amf_node_free (node);
 }
 
 static void
-create_stream_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
-    const char *command_name, int transaction_id, GstAmfNode * command_object,
-    GstAmfNode * optional_args, gpointer user_data)
+create_stream_done (const gchar * command_name, GPtrArray * args,
+    gpointer user_data)
 {
   GTask *task = G_TASK (user_data);
   GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
 
-  if (!optional_args) {
+  if (args->len < 2) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
         "createStream failed");
     g_object_unref (task);
@@ -859,7 +841,7 @@ create_stream_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
   }
 
   GST_DEBUG_OBJECT (rtmp2sink, "createStream success, stream_id=%.0f",
-      gst_amf_node_get_number (optional_args));
+      gst_amf_node_get_number (g_ptr_array_index (args, 1)));
 
   if (g_task_return_error_if_cancelled (task)) {
     g_object_unref (task);
@@ -878,27 +860,31 @@ send_publish (GTask * task)
   GstAmfNode *node2;
   GstAmfNode *node3;
 
-  node = gst_amf_node_new (GST_AMF_TYPE_NULL);
-  node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node2, rtmp2sink->location.stream);
-  node3 = gst_amf_node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_set_string (node3, DEFAULT_PUBLISHING_TYPE);
-  gst_rtmp_connection_send_command2 (connection, 4, 1, "publish",
-      5, node, node2, node3, NULL, publish_done, task);
+  node = gst_amf_node_new_null ();
+  node2 = gst_amf_node_new_string (rtmp2sink->location.stream);
+  node3 = gst_amf_node_new_string (DEFAULT_PUBLISHING_TYPE);
+  gst_rtmp_connection_send_command (connection, publish_done, task, 1,
+      "publish", node, node2, node3, NULL);
   gst_amf_node_free (node);
   gst_amf_node_free (node2);
   gst_amf_node_free (node3);
 }
 
 static void
-publish_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
-    const char *command_name, int transaction_id, GstAmfNode * command_object,
-    GstAmfNode * optional_args, gpointer user_data)
+publish_done (const gchar * command_name, GPtrArray * args, gpointer user_data)
 {
   GTask *task = G_TASK (user_data);
+  GstRtmpConnection *connection = g_task_get_task_data (task);
   GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
+  GstAmfType optional_args_type = GST_AMF_TYPE_INVALID;
+  GstAmfNode *optional_args;
 
-  switch (optional_args ? optional_args->type : GST_AMF_TYPE_INVALID) {
+  if (args->len > 1) {
+    optional_args = g_ptr_array_index (args, 1);
+    optional_args_type = gst_amf_node_get_type (optional_args);
+  }
+
+  switch (optional_args_type) {
     case GST_AMF_TYPE_NUMBER:
       GST_DEBUG_OBJECT (rtmp2sink, "publish success, stream_id=%.0f",
           gst_amf_node_get_number (optional_args));
@@ -907,8 +893,8 @@ publish_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
       break;
 
     case GST_AMF_TYPE_OBJECT:{
-      const GstAmfNode *node = gst_amf_node_get_object (optional_args, "code");
-      const gchar *code = node ? gst_amf_node_get_string (node) : NULL;
+      const GstAmfNode *node = gst_amf_node_get_field (optional_args, "code");
+      const gchar *code = node ? gst_amf_node_peek_string (node) : NULL;
 
       if (g_str_equal (code, "NetStream.Publish.Start")) {
         GST_DEBUG_OBJECT (rtmp2sink, "publish success, code=%s", code);
