@@ -36,10 +36,8 @@ G_BEGIN_DECLS
 typedef struct _GstRtmpConnection GstRtmpConnection;
 typedef struct _GstRtmpConnectionClass GstRtmpConnectionClass;
 typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection *connection);
-typedef void (*GstRtmpCommandCallback) (GstRtmpConnection *connection,
-    GstRtmpChunk *chunk, const char *command_name, int transaction_id,
-    GstAmfNode *command_object, GstAmfNode *optional_args,
-    gpointer user_data);
+typedef void (*GstRtmpCommandCallback) (const gchar *command_name,
+    GPtrArray *arguments, gpointer user_data);
 typedef void (*GstRtmpConnectionGotChunkFunc)
     (GstRtmpConnection *connection, GstRtmpChunk *chunk, gpointer user_data);
 
@@ -68,6 +66,7 @@ struct _GstRtmpConnection
   gboolean handshake_complete;
   GstRtmpChunkCache *input_chunk_cache, *output_chunk_cache;
   GList *command_callbacks;
+  guint transaction_count;
 
   GstRtmpConnectionGotChunkFunc chunk_handler_callback;
   gpointer chunk_handler_callback_user_data;
@@ -105,15 +104,10 @@ void gst_rtmp_connection_start_handshake (GstRtmpConnection *connection,
 void gst_rtmp_connection_queue_chunk (GstRtmpConnection *connection,
     GstRtmpChunk *chunk);
 
-int gst_rtmp_connection_send_command (GstRtmpConnection *connection,
-    int chunk_stream_id, const char *command_name, int transaction_id,
-    GstAmfNode *command_object, GstAmfNode *optional_args,
-    GstRtmpCommandCallback response_command, gpointer user_data);
-int gst_rtmp_connection_send_command2 (GstRtmpConnection *connection,
-    int chunk_stream_id, int stream_id, const char *command_name,
-    int transaction_id, GstAmfNode *command_object, GstAmfNode *optional_args,
-    GstAmfNode *n3, GstAmfNode *n4,
-    GstRtmpCommandCallback response_command, gpointer user_data);
+guint gst_rtmp_connection_send_command (GstRtmpConnection *connection,
+    GstRtmpCommandCallback response_command, gpointer user_data,
+    guint32 stream_id, const gchar *command_name, const GstAmfNode * argument,
+    ...) G_GNUC_NULL_TERMINATED;
 
 
 G_END_DECLS

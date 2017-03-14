@@ -103,14 +103,11 @@ static void gst_rtmp2_src_task (gpointer user_data);
 static void client_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
 static void send_create_stream (GTask * task);
-static void create_stream_done (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk, const char *command_name, int transaction_id,
-    GstAmfNode * command_object, GstAmfNode * optional_args,
+static void create_stream_done (const gchar * command_name, GPtrArray * args,
     gpointer user_data);
 static void send_play (GTask * task);
-static void play_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
-    const char *command_name, int transaction_id, GstAmfNode * command_object,
-    GstAmfNode * optional_args, gpointer user_data);
+static void play_done (const gchar * command_name, GPtrArray * args,
+    gpointer user_data);
 static void new_connect (GstRtmp2Src * rtmp2src);
 static void connect_task_done (GObject * object, GAsyncResult * result,
     gpointer user_data);
@@ -684,21 +681,20 @@ send_create_stream (GTask * task)
   GstRtmpConnection *connection = g_task_get_task_data (task);
   GstAmfNode *node;
 
-  node = gst_amf_node_new (GST_AMF_TYPE_NULL);
-  gst_rtmp_connection_send_command (connection, 3, "createStream", 2,
-      node, NULL, create_stream_done, task);
+  node = gst_amf_node_new_null ();
+  gst_rtmp_connection_send_command (connection, create_stream_done, task, 0,
+      "createStream", node, NULL);
   gst_amf_node_free (node);
 }
 
 static void
-create_stream_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
-    const char *command_name, int transaction_id, GstAmfNode * command_object,
-    GstAmfNode * optional_args, gpointer user_data)
+create_stream_done (const gchar * command_name, GPtrArray * args,
+    gpointer user_data)
 {
   GTask *task = G_TASK (user_data);
   GstRtmp2Src *rtmp2src = g_task_get_source_object (task);
 
-  if (!optional_args) {
+  if (args->len < 2) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
         "createStream failed");
     g_object_unref (task);
@@ -706,7 +702,7 @@ create_stream_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
   }
 
   GST_DEBUG_OBJECT (rtmp2src, "createStream success, stream_id=%.0f",
-      gst_amf_node_get_number (optional_args));
+      gst_amf_node_get_number (g_ptr_array_index (args, 1)));
 
   if (g_task_return_error_if_cancelled (task)) {
     g_object_unref (task);
@@ -725,31 +721,36 @@ send_play (GTask * task)
   GstAmfNode *node2;
   GstAmfNode *node3;
 
-  node = gst_amf_node_new (GST_AMF_TYPE_NULL);
-  node2 = gst_amf_node_new (GST_AMF_TYPE_STRING);
+  node = gst_amf_node_new_null ();
+  node3 = gst_amf_node_new_number (0);
 
   GST_OBJECT_LOCK (rtmp2src);
-  gst_amf_node_set_string (node2, rtmp2src->location.stream);
+  node2 = gst_amf_node_new_string (rtmp2src->location.stream);
   GST_OBJECT_UNLOCK (rtmp2src);
 
-  node3 = gst_amf_node_new (GST_AMF_TYPE_NUMBER);
-  gst_amf_node_set_number (node3, 0);
-  gst_rtmp_connection_send_command2 (connection, 8, 1, "play", 3, node,
-      node2, node3, NULL, play_done, task);
+  gst_rtmp_connection_send_command (connection, play_done, task, 1,
+      "play", node, node2, node3, NULL);
+
   gst_amf_node_free (node);
   gst_amf_node_free (node2);
   gst_amf_node_free (node3);
 }
 
 static void
-play_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
-    const char *command_name, int transaction_id, GstAmfNode * command_object,
-    GstAmfNode * optional_args, gpointer user_data)
+play_done (const gchar * command_name, GPtrArray * args, gpointer user_data)
 {
   GTask *task = G_TASK (user_data);
+  GstRtmpConnection *connection = g_task_get_task_data (task);
   GstRtmp2Src *rtmp2src = g_task_get_source_object (task);
+  GstAmfType optional_args_type = GST_AMF_TYPE_INVALID;
+  GstAmfNode *optional_args;
 
-  switch (optional_args ? optional_args->type : GST_AMF_TYPE_INVALID) {
+  if (args->len > 1) {
+    optional_args = g_ptr_array_index (args, 1);
+    optional_args_type = gst_amf_node_get_type (optional_args);
+  }
+
+  switch (optional_args_type) {
     case GST_AMF_TYPE_NUMBER:
       GST_DEBUG_OBJECT (rtmp2src, "play success, stream_id=%.0f",
           gst_amf_node_get_number (optional_args));
@@ -758,8 +759,8 @@ play_done (GstRtmpConnection * connection, GstRtmpChunk * chunk,
       break;
 
     case GST_AMF_TYPE_OBJECT:{
-      const GstAmfNode *node = gst_amf_node_get_object (optional_args, "code");
-      const gchar *code = node ? gst_amf_node_get_string (node) : NULL;
+      const GstAmfNode *node = gst_amf_node_get_field (optional_args, "code");
+      const gchar *code = node ? gst_amf_node_peek_string (node) : NULL;
 
       if (g_str_equal (code, "NetStream.Play.Start") ||
           g_str_equal (code, "NetStream.Play.Reset")) {

@@ -101,9 +101,6 @@ guint32 gst_rtmp_chunk_parse_stream_id (const guint8 * data, gsize size);
 gboolean gst_rtmp_chunk_parse_header (GstRtmpChunkHeader *header,
     const guint8 * data, gsize size, GstRtmpChunkHeader *previous_header,
     gboolean continuation);
-gboolean gst_rtmp_chunk_parse_message (GstRtmpChunk *chunk,
-    char **command_name, double *transaction_id,
-    GstAmfNode **command_object, GstAmfNode **optional_args);
 
 /* chunk cache */
 
