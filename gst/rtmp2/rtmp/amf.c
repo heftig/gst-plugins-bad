@@ -299,7 +299,7 @@ gst_amf_node_set_number (GstAmfNode * node, gdouble value)
 }
 
 void
-gst_amf_node_set_string_take (GstAmfNode * node, gchar * value)
+gst_amf_node_take_string (GstAmfNode * node, gchar * value)
 {
   g_return_if_fail (node->type == GST_AMF_TYPE_STRING);
   g_free (node->value.v_string);
@@ -309,7 +309,7 @@ gst_amf_node_set_string_take (GstAmfNode * node, gchar * value)
 void
 gst_amf_node_set_string (GstAmfNode * node, const gchar * value)
 {
-  gst_amf_node_set_string_take (node, g_strdup (value));
+  gst_amf_node_take_string (node, g_strdup (value));
 }
 
 void
