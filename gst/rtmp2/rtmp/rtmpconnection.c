@@ -33,6 +33,53 @@
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_connection_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_connection_debug_category
 
+struct _GstRtmpConnection
+{
+  GObject object;
+
+  /* should be properties */
+  gboolean input_paused;
+  gboolean closed;
+
+  /* private */
+  GThread *thread;
+  GSocketConnection *connection;
+  GCancellable *cancellable;
+  int state;
+  GSocketClient *socket_client;
+  GAsyncQueue *output_queue;
+  GMainContext *main_context;
+
+  GSource *input_source;
+  GByteArray *input_bytes;
+  guint input_needed_bytes;
+  GstRtmpConnectionCallback input_callback;
+  gboolean handshake_complete;
+  GstRtmpChunkCache *input_chunk_cache, *output_chunk_cache;
+  GList *command_callbacks;
+  guint transaction_count;
+
+  GstRtmpConnectionGotChunkFunc chunk_handler_callback;
+  gpointer chunk_handler_callback_user_data;
+  GDestroyNotify chunk_handler_callback_user_data_destroy;
+
+  /* chunk currently being written */
+  GBytes *output_bytes;
+
+  /* RTMP configuration */
+  gsize in_chunk_size;
+  gsize out_chunk_size;
+  gsize window_ack_size;
+  gsize total_input_bytes;
+  gsize bytes_since_ack;
+  gsize peer_bandwidth;
+};
+
+struct _GstRtmpConnectionClass
+{
+  GObjectClass object_class;
+};
+
 /* prototypes */
 
 static void gst_rtmp_connection_dispose (GObject * object);
