@@ -35,59 +35,12 @@ G_BEGIN_DECLS
 
 typedef struct _GstRtmpConnection GstRtmpConnection;
 typedef struct _GstRtmpConnectionClass GstRtmpConnectionClass;
+
 typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection *connection);
 typedef void (*GstRtmpCommandCallback) (const gchar *command_name,
     GPtrArray *arguments, gpointer user_data);
 typedef void (*GstRtmpConnectionGotChunkFunc)
     (GstRtmpConnection *connection, GstRtmpChunk *chunk, gpointer user_data);
-
-
-struct _GstRtmpConnection
-{
-  GObject object;
-
-  /* should be properties */
-  gboolean input_paused;
-  gboolean closed;
-
-  /* private */
-  GThread *thread;
-  GSocketConnection *connection;
-  GCancellable *cancellable;
-  int state;
-  GSocketClient *socket_client;
-  GAsyncQueue *output_queue;
-  GMainContext *main_context;
-
-  GSource *input_source;
-  GByteArray *input_bytes;
-  guint input_needed_bytes;
-  GstRtmpConnectionCallback input_callback;
-  gboolean handshake_complete;
-  GstRtmpChunkCache *input_chunk_cache, *output_chunk_cache;
-  GList *command_callbacks;
-  guint transaction_count;
-
-  GstRtmpConnectionGotChunkFunc chunk_handler_callback;
-  gpointer chunk_handler_callback_user_data;
-  GDestroyNotify chunk_handler_callback_user_data_destroy;
-
-  /* chunk currently being written */
-  GBytes *output_bytes;
-
-  /* RTMP configuration */
-  gsize in_chunk_size;
-  gsize out_chunk_size;
-  gsize window_ack_size;
-  gsize total_input_bytes;
-  gsize bytes_since_ack;
-  gsize peer_bandwidth;
-};
-
-struct _GstRtmpConnectionClass
-{
-  GObjectClass object_class;
-};
 
 GType gst_rtmp_connection_get_type (void);
 
