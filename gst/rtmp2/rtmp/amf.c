@@ -839,6 +839,9 @@ gst_amf_serialize_command_valist (gdouble transaction_id,
   const GstAmfNode *node;
   guint i = 0;
 
+  g_return_val_if_fail (command_name, NULL);
+  g_return_val_if_fail (argument, NULL);
+
   GST_LOG ("Serializing command '%s', transid %.0f", command_name,
       transaction_id);
 
