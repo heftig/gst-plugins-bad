@@ -124,17 +124,21 @@ static void gst_rtmp_connection_send_window_size_request (GstRtmpConnection *
 typedef struct _CommandCallback CommandCallback;
 struct _CommandCallback
 {
+  guint32 stream_id;
   gdouble transaction_id;
+  gchar *command_name;
   GstRtmpCommandCallback func;
   gpointer user_data;
 };
 
 static CommandCallback *
-command_callback_new (gdouble transaction_id, GstRtmpCommandCallback func,
-    gpointer user_data)
+command_callback_new (guint32 stream_id, gdouble transaction_id,
+    const gchar * command_name, GstRtmpCommandCallback func, gpointer user_data)
 {
   CommandCallback *data = g_slice_new (CommandCallback);
+  data->stream_id = stream_id;
   data->transaction_id = transaction_id;
+  data->command_name = g_strdup (command_name);
   data->func = func;
   data->user_data = user_data;
   return data;
@@ -144,6 +148,7 @@ static void
 command_callback_free (gpointer ptr)
 {
   CommandCallback *data = ptr;
+  g_free (data->command_name);
   g_slice_free (CommandCallback, data);
 }
 
@@ -734,10 +739,10 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstRtmpChunk * chunk)
 
   if (transaction_id < 0 || transaction_id > G_MAXUINT) {
     GST_WARNING ("Server sent extreme transaction id %.0f", transaction_id);
-  } else if (transaction_id >= sc->transaction_count) {
+  } else if (transaction_id > sc->transaction_count) {
     GST_WARNING ("Server sent command with unused transaction ID (%.0f > %u)",
-        transaction_id, sc->transaction_count - 1);
-    sc->transaction_count = transaction_id + 1;
+        transaction_id, sc->transaction_count);
+    sc->transaction_count = transaction_id;
   }
 
   GST_DEBUG ("got control message \"%s\" transaction %.0f size %"
@@ -745,14 +750,26 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstRtmpChunk * chunk)
       chunk->message_length);
 
   for (l = sc->command_callbacks; l; l = g_list_next (l)) {
-    CommandCallback *cb = l->data;
-    if (cb->transaction_id == transaction_id) {
-      GST_TRACE ("calling command callback %s",
-          GST_DEBUG_FUNCPTR_NAME (cb->func));
-      sc->command_callbacks = g_list_remove_link (sc->command_callbacks, l);
-      cb->func (command_name, args, cb->user_data);
-      g_list_free_full (l, command_callback_free);
+    CommandCallback *cc = l->data;
+
+    if (cc->stream_id != chunk->stream_id) {
+      continue;
     }
+
+    if (cc->transaction_id != transaction_id) {
+      continue;
+    }
+
+    if (cc->command_name && g_strcmp0 (cc->command_name, command_name)) {
+      continue;
+    }
+
+    GST_TRACE ("calling command callback %s",
+        GST_DEBUG_FUNCPTR_NAME (cc->func));
+    sc->command_callbacks = g_list_remove_link (sc->command_callbacks, l);
+    cc->func (command_name, args, cc->user_data);
+    g_list_free_full (l, command_callback_free);
+    break;
   }
 
   g_free (command_name);
@@ -980,11 +997,26 @@ gst_rtmp_connection_send_command (GstRtmpConnection * connection,
     ...)
 {
   GstRtmpChunk *chunk;
-  gdouble transaction_id;
+  gdouble transaction_id = 0;
   va_list ap;
 
   if (connection->thread != g_thread_self ()) {
     GST_ERROR ("Called from wrong thread");
+  }
+
+  if (response_command) {
+    CommandCallback *cc;
+
+    transaction_id = ++connection->transaction_count;
+
+    GST_TRACE ("Registering %s for transid %.0f",
+        GST_DEBUG_FUNCPTR_NAME (response_command), transaction_id);
+
+    cc = command_callback_new (stream_id, transaction_id, NULL,
+        response_command, user_data);
+
+    connection->command_callbacks =
+        g_list_append (connection->command_callbacks, cc);
   }
 
   chunk = gst_rtmp_chunk_new ();
@@ -992,8 +1024,6 @@ gst_rtmp_connection_send_command (GstRtmpConnection * connection,
   chunk->timestamp = 0;         /* FIXME */
   chunk->message_type_id = GST_RTMP_MESSAGE_TYPE_COMMAND;
   chunk->stream_id = stream_id;
-
-  transaction_id = connection->transaction_count++;
 
   va_start (ap, argument);
   chunk->payload = gst_amf_serialize_command_valist (transaction_id,
@@ -1003,16 +1033,28 @@ gst_rtmp_connection_send_command (GstRtmpConnection * connection,
   chunk->message_length = g_bytes_get_size (chunk->payload);
 
   gst_rtmp_connection_queue_chunk (connection, chunk);
-
-  if (response_command) {
-    GST_TRACE ("Registering %s for transid %.0f",
-        GST_DEBUG_FUNCPTR_NAME (response_command), transaction_id);
-    connection->command_callbacks =
-        g_list_append (connection->command_callbacks,
-        command_callback_new (transaction_id, response_command, user_data));
-  }
-
   return transaction_id;
+}
+
+void
+gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
+    GstRtmpCommandCallback response_command, gpointer user_data,
+    guint32 stream_id, const gchar * command_name)
+{
+  CommandCallback *cc;
+
+  g_return_if_fail (response_command);
+  g_return_if_fail (command_name);
+
+  GST_TRACE ("Registering %s for stream id %" G_GUINT32_FORMAT
+      " name \"%s\"", GST_DEBUG_FUNCPTR_NAME (response_command),
+      stream_id, command_name);
+
+  cc = command_callback_new (stream_id, 0, command_name, response_command,
+      user_data);
+
+  connection->command_callbacks =
+      g_list_append (connection->command_callbacks, cc);
 }
 
 static void
