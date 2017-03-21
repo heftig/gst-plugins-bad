@@ -510,14 +510,7 @@ static void
 gst_rtmp_connection_take_input_bytes (GstRtmpConnection * sc, gsize size,
     GBytes ** outbytes)
 {
-  gsize current_size;
-
-  current_size = sc->input_bytes->len;
-  if (size > current_size) {
-    g_critical ("Tried to take too many bytes; %" G_GSIZE_FORMAT
-        " > %" G_GSIZE_FORMAT, size, current_size);
-    return;
-  }
+  g_return_if_fail (size <= sc->input_bytes->len);
 
   if (outbytes) {
     *outbytes = g_bytes_new (sc->input_bytes->data, size);
