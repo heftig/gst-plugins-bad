@@ -777,6 +777,12 @@ gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
   gst_rtmp_connection_start_output (connection);
 }
 
+guint
+gst_rtmp_connection_get_num_queued (GstRtmpConnection * connection)
+{
+  return g_async_queue_length (connection->output_queue);
+}
+
 static void
 gst_rtmp_connection_set_input_callback (GstRtmpConnection * connection,
     GstRtmpConnectionCallback input_callback, guint needed_bytes)
