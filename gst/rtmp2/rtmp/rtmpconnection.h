@@ -36,7 +36,6 @@ G_BEGIN_DECLS
 typedef struct _GstRtmpConnection GstRtmpConnection;
 typedef struct _GstRtmpConnectionClass GstRtmpConnectionClass;
 
-typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection * connection);
 typedef void (*GstRtmpCommandCallback) (const gchar * command_name,
     GPtrArray * arguments, gpointer user_data);
 typedef void (*GstRtmpConnectionGotChunkFunc)
