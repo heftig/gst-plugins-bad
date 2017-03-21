@@ -60,9 +60,9 @@ struct _GstRtmpConnection
   GList *command_callbacks;
   guint transaction_count;
 
-  GstRtmpConnectionChunkFunc chunk_handler_callback;
-  gpointer chunk_handler_callback_user_data;
-  GDestroyNotify chunk_handler_callback_user_data_destroy;
+  GstRtmpConnectionChunkFunc input_handler;
+  gpointer input_handler_user_data;
+  GDestroyNotify input_handler_user_data_destroy;
 
   /* chunk currently being written */
   GBytes *output_bytes;
@@ -205,7 +205,7 @@ gst_rtmp_connection_dispose (GObject * object)
 
   gst_rtmp_connection_close (rtmpconnection);
   g_cancellable_cancel (rtmpconnection->cancellable);
-  gst_rtmp_connection_set_chunk_callback (rtmpconnection, NULL, NULL, NULL);
+  gst_rtmp_connection_set_input_handler (rtmpconnection, NULL, NULL, NULL);
 
   G_OBJECT_CLASS (gst_rtmp_connection_parent_class)->dispose (object);
 }
@@ -299,18 +299,17 @@ gst_rtmp_connection_close_and_unref (gpointer ptr)
 }
 
 void
-gst_rtmp_connection_set_chunk_callback (GstRtmpConnection * sc,
+gst_rtmp_connection_set_input_handler (GstRtmpConnection * sc,
     GstRtmpConnectionChunkFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy)
 {
-  if (sc->chunk_handler_callback_user_data_destroy) {
-    sc->chunk_handler_callback_user_data_destroy
-        (sc->chunk_handler_callback_user_data);
+  if (sc->input_handler_user_data_destroy) {
+    sc->input_handler_user_data_destroy (sc->input_handler_user_data);
   }
 
-  sc->chunk_handler_callback = callback;
-  sc->chunk_handler_callback_user_data = user_data;
-  sc->chunk_handler_callback_user_data_destroy = user_data_destroy;
+  sc->input_handler = callback;
+  sc->input_handler_user_data = user_data;
+  sc->input_handler_user_data_destroy = user_data_destroy;
 }
 
 static gboolean
@@ -596,9 +595,8 @@ gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
     gst_rtmp_chunk_free (chunk);
   } else {
     GST_LOG ("got chunk: %" G_GSIZE_FORMAT " bytes", chunk->message_length);
-    if (sc->chunk_handler_callback) {
-      sc->chunk_handler_callback (sc, chunk,
-          sc->chunk_handler_callback_user_data);
+    if (sc->input_handler) {
+      sc->input_handler (sc, chunk, sc->input_handler_user_data);
     } else {
       gst_rtmp_chunk_free (chunk);
     }

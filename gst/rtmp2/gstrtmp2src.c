@@ -625,7 +625,7 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
   rtmp2src->connect_task = NULL;
   rtmp2src->connection = g_task_propagate_pointer (task, &error);
   if (rtmp2src->connection) {
-    gst_rtmp_connection_set_chunk_callback (rtmp2src->connection,
+    gst_rtmp_connection_set_input_handler (rtmp2src->connection,
         got_chunk, g_object_ref (rtmp2src), g_object_unref);
     g_signal_connect_object (rtmp2src->connection, "closed",
         G_CALLBACK (connection_closed), rtmp2src, 0);
