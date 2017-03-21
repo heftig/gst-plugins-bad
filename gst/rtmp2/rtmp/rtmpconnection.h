@@ -52,8 +52,7 @@ void gst_rtmp_connection_set_chunk_callback (GstRtmpConnection * connection,
     GstRtmpConnectionGotChunkFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy);
 
-void gst_rtmp_connection_start_handshake (GstRtmpConnection * connection,
-    gboolean is_server);
+void gst_rtmp_connection_start_handshake (GstRtmpConnection * connection);
 void gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
     GstRtmpChunk * chunk);
 
