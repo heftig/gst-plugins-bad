@@ -36,31 +36,35 @@ G_BEGIN_DECLS
 typedef struct _GstRtmpConnection GstRtmpConnection;
 typedef struct _GstRtmpConnectionClass GstRtmpConnectionClass;
 
-typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection *connection);
-typedef void (*GstRtmpCommandCallback) (const gchar *command_name,
-    GPtrArray *arguments, gpointer user_data);
+typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection * connection);
+typedef void (*GstRtmpCommandCallback) (const gchar * command_name,
+    GPtrArray * arguments, gpointer user_data);
 typedef void (*GstRtmpConnectionGotChunkFunc)
-    (GstRtmpConnection *connection, GstRtmpChunk *chunk, gpointer user_data);
+    (GstRtmpConnection * connection, GstRtmpChunk * chunk, gpointer user_data);
 
 GType gst_rtmp_connection_get_type (void);
 
 GstRtmpConnection *gst_rtmp_connection_new (GSocketConnection * connection);
-void gst_rtmp_connection_close (GstRtmpConnection *connection);
+void gst_rtmp_connection_close (GstRtmpConnection * connection);
 void gst_rtmp_connection_close_and_unref (gpointer ptr);
 
-void gst_rtmp_connection_set_chunk_callback (GstRtmpConnection *connection,
+void gst_rtmp_connection_set_chunk_callback (GstRtmpConnection * connection,
     GstRtmpConnectionGotChunkFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy);
 
-void gst_rtmp_connection_start_handshake (GstRtmpConnection *connection,
+void gst_rtmp_connection_start_handshake (GstRtmpConnection * connection,
     gboolean is_server);
-void gst_rtmp_connection_queue_chunk (GstRtmpConnection *connection,
-    GstRtmpChunk *chunk);
+void gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
+    GstRtmpChunk * chunk);
 
-guint gst_rtmp_connection_send_command (GstRtmpConnection *connection,
+guint gst_rtmp_connection_send_command (GstRtmpConnection * connection,
     GstRtmpCommandCallback response_command, gpointer user_data,
-    guint32 stream_id, const gchar *command_name, const GstAmfNode * argument,
+    guint32 stream_id, const gchar * command_name, const GstAmfNode * argument,
     ...) G_GNUC_NULL_TERMINATED;
+
+void gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
+    GstRtmpCommandCallback response_command, gpointer user_data,
+    guint32 stream_id, const gchar * command_name);
 
 
 G_END_DECLS
