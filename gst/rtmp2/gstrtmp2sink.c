@@ -582,6 +582,12 @@ send_chunk (GstRtmp2Sink * self, GstRtmpChunk * chunk)
     g_cond_wait (&self->cond, &self->lock);
   }
 
+  while (G_UNLIKELY (!self->flushing &&
+          gst_rtmp_connection_get_num_queued (self->connection) > 3)) {
+    GST_LOG_OBJECT (self, "waiting for queue");
+    g_cond_wait (&self->cond, &self->lock);
+  }
+
   if (G_LIKELY (!self->flushing)) {
     send_streamheader (self);
     gst_rtmp_connection_queue_chunk (self->connection, chunk);
@@ -722,6 +728,17 @@ new_connect (GstRtmp2Sink * rtmp2sink)
 }
 
 static void
+put_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
+    gpointer user_data)
+{
+  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (user_data);
+
+  g_mutex_lock (&rtmp2sink->lock);
+  g_cond_signal (&rtmp2sink->cond);
+  g_mutex_unlock (&rtmp2sink->lock);
+}
+
+static void
 connection_closed (GstRtmpConnection * connection, GstRtmp2Sink * rtmp2sink)
 {
   g_mutex_lock (&rtmp2sink->lock);
@@ -751,6 +768,8 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
   rtmp2sink->connect_task = NULL;
   rtmp2sink->connection = g_task_propagate_pointer (task, &error);
   if (rtmp2sink->connection) {
+    gst_rtmp_connection_set_output_handler (rtmp2sink->connection,
+        put_chunk, g_object_ref (rtmp2sink), g_object_unref);
     g_signal_connect_object (rtmp2sink->connection, "closed",
         G_CALLBACK (connection_closed), rtmp2sink, 0);
   } else {
