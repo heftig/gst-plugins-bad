@@ -33,6 +33,8 @@
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_connection_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_connection_debug_category
 
+typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection * connection);
+
 struct _GstRtmpConnection
 {
   GObject object;
