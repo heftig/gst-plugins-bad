@@ -488,20 +488,16 @@ parse_u32 (AmfParser * parser)
 static gdouble
 parse_number (AmfParser * parser)
 {
-  union
-  {
-    gdouble v_double;
-    guint64 v_uint;
-  } transform;
+  gdouble value;
 
-  if (parser->offset + 8 > parser->size) {
+  if (parser->offset + sizeof value > parser->size) {
     GST_ERROR ("number too long");
     return 0.0;
   }
 
-  transform.v_uint = GST_READ_UINT64_BE (parser->data + parser->offset);
-  parser->offset += 8;
-  return transform.v_double;
+  value = GST_READ_DOUBLE_BE (parser->data + parser->offset);
+  parser->offset += sizeof value;
+  return value;
 }
 
 static gboolean
@@ -741,15 +737,8 @@ serialize_u32 (GByteArray * array, guint32 value)
 static void
 serialize_number (GByteArray * array, gdouble value)
 {
-  union
-  {
-    gdouble v_double;
-    guint64 v_uint;
-  } transform;
-
-  transform.v_double = value;
-  transform.v_uint = GUINT64_TO_BE (transform.v_uint);
-  g_byte_array_append (array, (guint8 *) & transform.v_uint, 8);
+  value = GDOUBLE_TO_BE (value);
+  g_byte_array_append (array, (guint8 *) & value, sizeof value);
 }
 
 static void
