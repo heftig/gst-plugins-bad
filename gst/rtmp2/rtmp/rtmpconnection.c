@@ -64,6 +64,10 @@ struct _GstRtmpConnection
   gpointer input_handler_user_data;
   GDestroyNotify input_handler_user_data_destroy;
 
+  GstRtmpConnectionChunkFunc output_handler;
+  gpointer output_handler_user_data;
+  GDestroyNotify output_handler_user_data_destroy;
+
   /* chunk currently being written */
   GBytes *output_bytes;
 
@@ -206,6 +210,7 @@ gst_rtmp_connection_dispose (GObject * object)
   gst_rtmp_connection_close (rtmpconnection);
   g_cancellable_cancel (rtmpconnection->cancellable);
   gst_rtmp_connection_set_input_handler (rtmpconnection, NULL, NULL, NULL);
+  gst_rtmp_connection_set_output_handler (rtmpconnection, NULL, NULL, NULL);
 
   G_OBJECT_CLASS (gst_rtmp_connection_parent_class)->dispose (object);
 }
@@ -312,6 +317,20 @@ gst_rtmp_connection_set_input_handler (GstRtmpConnection * sc,
   sc->input_handler_user_data_destroy = user_data_destroy;
 }
 
+void
+gst_rtmp_connection_set_output_handler (GstRtmpConnection * sc,
+    GstRtmpConnectionChunkFunc callback, gpointer user_data,
+    GDestroyNotify user_data_destroy)
+{
+  if (sc->output_handler_user_data_destroy) {
+    sc->output_handler_user_data_destroy (sc->output_handler_user_data);
+  }
+
+  sc->output_handler = callback;
+  sc->output_handler_user_data = user_data;
+  sc->output_handler_user_data_destroy = user_data_destroy;
+}
+
 static gboolean
 start_output (gpointer user_data)
 {
@@ -409,6 +428,10 @@ gst_rtmp_connection_output_chunk (GstRtmpConnection * sc)
     }
 
     dump_chunk (chunk, TRUE);
+
+    if (sc->output_handler) {
+      sc->output_handler (sc, chunk, sc->output_handler_user_data);
+    }
 
     entry = gst_rtmp_chunk_cache_get (sc->output_chunk_cache,
         chunk->chunk_stream_id);
