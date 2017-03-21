@@ -577,22 +577,20 @@ send_chunk (GstRtmp2Sink * self, GstRtmpChunk * chunk)
 
   g_mutex_lock (&self->lock);
 
-  while (G_UNLIKELY (!self->connection && !self->flushing)) {
+  while (G_UNLIKELY (!self->flushing && !self->connection)) {
     GST_DEBUG_OBJECT (self, "waiting for connection");
     g_cond_wait (&self->cond, &self->lock);
   }
 
-  if (G_UNLIKELY (self->flushing)) {
+  if (G_LIKELY (!self->flushing)) {
+    send_streamheader (self);
+    gst_rtmp_connection_queue_chunk (self->connection, chunk);
+    ret = GST_FLOW_OK;
+  } else {
     gst_rtmp_chunk_free (chunk);
     ret = GST_FLOW_FLUSHING;
-    goto out;
   }
 
-  send_streamheader (self);
-  gst_rtmp_connection_queue_chunk (self->connection, chunk);
-  ret = GST_FLOW_OK;
-
-out:
   g_mutex_unlock (&self->lock);
   return ret;
 }
