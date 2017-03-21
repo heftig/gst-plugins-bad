@@ -721,6 +721,9 @@ send_play (GTask * task)
   GstAmfNode *node2;
   GstAmfNode *node3;
 
+  gst_rtmp_connection_expect_command (connection, play_done, task, 1,
+      "onStatus");
+
   node = gst_amf_node_new_null ();
   node3 = gst_amf_node_new_number (0);
 
@@ -728,7 +731,7 @@ send_play (GTask * task)
   node2 = gst_amf_node_new_string (rtmp2src->location.stream);
   GST_OBJECT_UNLOCK (rtmp2src);
 
-  gst_rtmp_connection_send_command (connection, play_done, task, 1,
+  gst_rtmp_connection_send_command (connection, NULL, NULL, 1,
       "play", node, node2, node3, NULL);
 
   gst_amf_node_free (node);
@@ -751,13 +754,6 @@ play_done (const gchar * command_name, GPtrArray * args, gpointer user_data)
   }
 
   switch (optional_args_type) {
-    case GST_AMF_TYPE_NUMBER:
-      GST_DEBUG_OBJECT (rtmp2src, "play success, stream_id=%.0f",
-          gst_amf_node_get_number (optional_args));
-      g_task_return_pointer (task, g_object_ref (connection),
-          gst_rtmp_connection_close_and_unref);
-      break;
-
     case GST_AMF_TYPE_OBJECT:{
       const GstAmfNode *node = gst_amf_node_get_field (optional_args, "code");
       const gchar *code = node ? gst_amf_node_peek_string (node) : NULL;
