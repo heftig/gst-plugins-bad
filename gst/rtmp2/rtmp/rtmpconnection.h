@@ -57,8 +57,10 @@ void gst_rtmp_connection_set_output_handler (GstRtmpConnection * connection,
     GDestroyNotify user_data_destroy);
 
 void gst_rtmp_connection_start_handshake (GstRtmpConnection * connection);
+
 void gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
     GstRtmpChunk * chunk);
+guint gst_rtmp_connection_get_num_queued (GstRtmpConnection * connection);
 
 guint gst_rtmp_connection_send_command (GstRtmpConnection * connection,
     GstRtmpCommandCallback response_command, gpointer user_data,
