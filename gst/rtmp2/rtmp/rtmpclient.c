@@ -254,7 +254,7 @@ socket_connect_done (GObject * source, GAsyncResult * result,
   data->id_connection_closed_cb = g_signal_connect_object (rtmp_connection,
       "closed", G_CALLBACK (connection_attempt_closed), task, 0);
 
-  gst_rtmp_connection_start_handshake (rtmp_connection, FALSE);
+  gst_rtmp_connection_start_handshake (rtmp_connection);
   g_object_unref (socket_connection);
 
   send_connect (task, rtmp_connection);
