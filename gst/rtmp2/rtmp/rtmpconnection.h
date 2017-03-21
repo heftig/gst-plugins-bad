@@ -48,7 +48,7 @@ GstRtmpConnection *gst_rtmp_connection_new (GSocketConnection * connection);
 void gst_rtmp_connection_close (GstRtmpConnection * connection);
 void gst_rtmp_connection_close_and_unref (gpointer ptr);
 
-void gst_rtmp_connection_set_chunk_callback (GstRtmpConnection * connection,
+void gst_rtmp_connection_set_input_handler (GstRtmpConnection * connection,
     GstRtmpConnectionChunkFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy);
 
