@@ -60,7 +60,7 @@ struct _GstRtmpConnection
   GList *command_callbacks;
   guint transaction_count;
 
-  GstRtmpConnectionGotChunkFunc chunk_handler_callback;
+  GstRtmpConnectionChunkFunc chunk_handler_callback;
   gpointer chunk_handler_callback_user_data;
   GDestroyNotify chunk_handler_callback_user_data_destroy;
 
@@ -300,7 +300,7 @@ gst_rtmp_connection_close_and_unref (gpointer ptr)
 
 void
 gst_rtmp_connection_set_chunk_callback (GstRtmpConnection * sc,
-    GstRtmpConnectionGotChunkFunc callback, gpointer user_data,
+    GstRtmpConnectionChunkFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy)
 {
   if (sc->chunk_handler_callback_user_data_destroy) {

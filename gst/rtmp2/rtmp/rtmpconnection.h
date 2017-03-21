@@ -36,10 +36,11 @@ G_BEGIN_DECLS
 typedef struct _GstRtmpConnection GstRtmpConnection;
 typedef struct _GstRtmpConnectionClass GstRtmpConnectionClass;
 
+typedef void (*GstRtmpConnectionChunkFunc)
+    (GstRtmpConnection * connection, GstRtmpChunk * chunk, gpointer user_data);
+
 typedef void (*GstRtmpCommandCallback) (const gchar * command_name,
     GPtrArray * arguments, gpointer user_data);
-typedef void (*GstRtmpConnectionGotChunkFunc)
-    (GstRtmpConnection * connection, GstRtmpChunk * chunk, gpointer user_data);
 
 GType gst_rtmp_connection_get_type (void);
 
@@ -48,7 +49,7 @@ void gst_rtmp_connection_close (GstRtmpConnection * connection);
 void gst_rtmp_connection_close_and_unref (gpointer ptr);
 
 void gst_rtmp_connection_set_chunk_callback (GstRtmpConnection * connection,
-    GstRtmpConnectionGotChunkFunc callback, gpointer user_data,
+    GstRtmpConnectionChunkFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy);
 
 void gst_rtmp_connection_start_handshake (GstRtmpConnection * connection);
