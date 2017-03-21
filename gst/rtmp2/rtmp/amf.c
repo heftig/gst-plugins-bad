@@ -461,28 +461,28 @@ static GstAmfNode *parse_value (AmfParser * parser);
 static inline guint8
 parse_u8 (AmfParser * parser)
 {
-  guint8 x;
-  x = parser->data[parser->offset];
-  parser->offset++;
-  return x;
+  guint8 value;
+  value = parser->data[parser->offset];
+  parser->offset += sizeof value;
+  return value;
 }
 
 static inline guint16
 parse_u16 (AmfParser * parser)
 {
-  guint16 x;
-  x = GST_READ_UINT16_BE (parser->data + parser->offset);
-  parser->offset += 2;
-  return x;
+  guint16 value;
+  value = GST_READ_UINT16_BE (parser->data + parser->offset);
+  parser->offset += sizeof value;
+  return value;
 }
 
 static inline guint32
 parse_u32 (AmfParser * parser)
 {
-  guint32 x;
-  x = GST_READ_UINT32_BE (parser->data + parser->offset);
-  parser->offset += 4;
-  return x;
+  guint32 value;
+  value = GST_READ_UINT32_BE (parser->data + parser->offset);
+  parser->offset += sizeof value;
+  return value;
 }
 
 static gdouble
@@ -507,21 +507,24 @@ parse_number (AmfParser * parser)
 static gboolean
 parse_boolean (AmfParser * parser)
 {
-  if (parser->offset + 1 > parser->size) {
+  guint8 value;
+
+  if (parser->offset + sizeof value > parser->size) {
     GST_ERROR ("boolean too long");
     return FALSE;
   }
 
-  return ! !parse_u8 (parser);
+  value = parse_u8 (parser);
+  return ! !value;
 }
 
 static gchar *
 parse_string (AmfParser * parser)
 {
-  gsize size;
+  guint16 size;
   gchar *string;
 
-  if (parser->offset + 2 > parser->size) {
+  if (parser->offset + sizeof size > parser->size) {
     GST_ERROR ("string size too long");
     return NULL;
   }
@@ -718,21 +721,21 @@ static void serialize_value (GByteArray * array, const GstAmfNode * node);
 static inline void
 serialize_u8 (GByteArray * array, guint8 value)
 {
-  g_byte_array_append (array, (guint8 *) & value, 1);
+  g_byte_array_append (array, (guint8 *) & value, sizeof value);
 }
 
 static inline void
 serialize_u16 (GByteArray * array, guint16 value)
 {
   value = GUINT16_TO_BE (value);
-  g_byte_array_append (array, (guint8 *) & value, 2);
+  g_byte_array_append (array, (guint8 *) & value, sizeof value);
 }
 
 static inline void
 serialize_u32 (GByteArray * array, guint32 value)
 {
   value = GUINT32_TO_BE (value);
-  g_byte_array_append (array, (guint8 *) & value, 4);
+  g_byte_array_append (array, (guint8 *) & value, sizeof value);
 }
 
 static void
