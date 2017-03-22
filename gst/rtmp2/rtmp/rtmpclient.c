@@ -128,7 +128,7 @@ task_data_free (gpointer ptr)
     g_signal_handler_disconnect (data->connection,
         data->id_connection_closed_cb);
   }
-  g_object_unref (data->connection);
+  g_clear_object (&data->connection);
   g_slice_free (TaskData, data);
 }
 
