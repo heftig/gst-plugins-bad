@@ -34,14 +34,21 @@ GST_DEBUG_CATEGORY_STATIC (gst_rtmp_client_debug_category);
 static void socket_connect (GTask * task);
 static void socket_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
-static gchar *do_adobe_auth (const gchar * username, const gchar * password,
-    const gchar * salt, const gchar * opaque, const gchar * challenge);
-static void send_connect (GTask * task, GstRtmpConnection * connection);
+static void handshake1 (GTask * task);
+static void handshake1_done (GObject * source, GAsyncResult * result,
+    gpointer user_data);
+static void handshake2 (GTask * task);
+static void handshake2_done (GObject * source, GAsyncResult * result,
+    gpointer user_data);
+static void handshake3 (GTask * task, const guint8 * s1);
+static void handshake3_done (GObject * source, GAsyncResult * result,
+    gpointer user_data);
+static void send_connect (GTask * task);
 static void send_connect_done (const gchar * command_name, GPtrArray * args,
     gpointer user_data);
 static void send_secure_token_response (GTask * task,
     GstRtmpConnection * connection, const gchar * challenge);
-static void connection_attempt_closed (GstRtmpConnection * connection,
+static void connection_error (GstRtmpConnection * connection,
     gpointer user_data);
 
 void
@@ -103,18 +110,16 @@ typedef struct
 {
   GstRtmpLocation location;
   gchar *auth_query;
-  GstRtmpConnection *connection;
-  gulong id_connection_closed_cb;
+  GSocketConnection *socket_connection;
+  GstRtmpConnection *rtmp_connection;
+  gulong rtmp_error_handler_id;
 } TaskData;
 
 static TaskData *
 task_data_new (const GstRtmpLocation * location)
 {
-  TaskData *data = g_slice_new (TaskData);
-  data->auth_query = NULL;
+  TaskData *data = g_slice_new0 (TaskData);
   gst_rtmp_location_copy (&data->location, location);
-  data->connection = NULL;
-  data->id_connection_closed_cb = 0;
   return data;
 }
 
@@ -124,11 +129,12 @@ task_data_free (gpointer ptr)
   TaskData *data = ptr;
   gst_rtmp_location_clear (&data->location);
   g_clear_pointer (&data->auth_query, g_free);
-  if (data->id_connection_closed_cb) {
-    g_signal_handler_disconnect (data->connection,
-        data->id_connection_closed_cb);
+  if (data->rtmp_error_handler_id) {
+    g_signal_handler_disconnect (data->rtmp_connection,
+        data->rtmp_error_handler_id);
   }
-  g_clear_object (&data->connection);
+  g_clear_object (&data->rtmp_connection);
+  g_clear_object (&data->socket_connection);
   g_slice_free (TaskData, data);
 }
 
@@ -198,25 +204,33 @@ socket_connect (GTask * task)
     data->location.timeout = DEFAULT_TIMEOUT;
   }
 
-  if (data->id_connection_closed_cb) {
-    g_signal_handler_disconnect (data->connection,
-        data->id_connection_closed_cb);
-    data->id_connection_closed_cb = 0;
+  if (data->rtmp_error_handler_id) {
+    g_signal_handler_disconnect (data->rtmp_connection,
+        data->rtmp_error_handler_id);
+    data->rtmp_error_handler_id = 0;
   }
 
-  if (data->connection) {
-    gst_rtmp_connection_close (data->connection);
-    g_clear_object (&data->connection);
+  if (data->rtmp_connection) {
+    gst_rtmp_connection_close (data->rtmp_connection);
+    g_clear_object (&data->rtmp_connection);
+  }
+
+  if (data->socket_connection) {
+    g_io_stream_close_async (G_IO_STREAM (data->socket_connection),
+        G_PRIORITY_DEFAULT, NULL, NULL, NULL);
+    g_clear_object (&data->socket_connection);
   }
 
   addr = g_network_address_new (data->location.host, data->location.port);
   socket_client = g_socket_client_new ();
   g_socket_client_set_timeout (socket_client, data->location.timeout);
 
-  GST_DEBUG ("g_socket_client_connect_async");
+  GST_DEBUG ("Starting socket connection");
+
   g_socket_client_connect_async (socket_client, addr,
       g_task_get_cancellable (task), socket_connect_done, task);
   g_object_unref (addr);
+  g_object_unref (socket_client);
 }
 
 static void
@@ -227,46 +241,191 @@ socket_connect_done (GObject * source, GAsyncResult * result,
   GTask *task = user_data;
   TaskData *data = g_task_get_task_data (task);
   GError *error = NULL;
-  GSocketConnection *socket_connection;
-  GstRtmpConnection *rtmp_connection;
 
-  GST_DEBUG ("g_socket_client_connect_done");
-  socket_connection =
+  data->socket_connection =
       g_socket_client_connect_finish (socket_client, result, &error);
-  g_object_unref (socket_client);
 
   if (g_task_return_error_if_cancelled (task)) {
-    GST_DEBUG ("was cancelled");
+    GST_DEBUG ("Socket connection was cancelled");
     g_object_unref (task);
     return;
   }
 
-  if (socket_connection == NULL) {
-    GST_ERROR ("error");
+  if (data->socket_connection == NULL) {
+    GST_ERROR ("Socket connection error");
     g_task_return_error (task, error);
     g_object_unref (task);
     return;
   }
 
-  rtmp_connection = gst_rtmp_connection_new (socket_connection);
+  GST_DEBUG ("Socket connection established");
 
-  data->connection = g_object_ref (rtmp_connection);
-  data->id_connection_closed_cb = g_signal_connect_object (rtmp_connection,
-      "closed", G_CALLBACK (connection_attempt_closed), task, 0);
+  handshake1 (task);
+}
 
-  gst_rtmp_connection_start_handshake (rtmp_connection);
-  g_object_unref (socket_connection);
+static inline void
+serialize_u8 (GByteArray * array, guint8 value)
+{
+  g_byte_array_append (array, (guint8 *) & value, sizeof value);
+}
 
-  send_connect (task, rtmp_connection);
-  g_object_unref (rtmp_connection);
+static inline void
+serialize_u32 (GByteArray * array, guint32 value)
+{
+  value = GUINT32_TO_BE (value);
+  g_byte_array_append (array, (guint8 *) & value, sizeof value);
 }
 
 static void
-connection_attempt_closed (GstRtmpConnection * connection, gpointer user_data)
+handshake1 (GTask * task)
+{
+  TaskData *data = g_task_get_task_data (task);
+  GOutputStream *os =
+      g_io_stream_get_output_stream (G_IO_STREAM (data->socket_connection));
+  GByteArray *ba = g_byte_array_sized_new (1 + 1536);
+  gint i;
+
+  serialize_u8 (ba, 3);         /* C0 version */
+  serialize_u32 (ba, g_get_monotonic_time () / 1000);   /* C1 time */
+  serialize_u32 (ba, 0);        /* C1 zero */
+
+  /* C1 random data */
+  for (i = 0; i < 1528; i += sizeof (guint32)) {
+    serialize_u32 (ba, g_random_int ());
+  }
+
+  GST_DEBUG ("Sending C0+C1");
+  GST_MEMDUMP (">>> C0", ba->data, 1);
+  GST_MEMDUMP (">>> C1", ba->data + 1, 1536);
+
+  gst_rtmp_output_stream_write_all_bytes_async (os,
+      g_byte_array_free_to_bytes (ba), G_PRIORITY_DEFAULT,
+      g_task_get_cancellable (task), handshake1_done, task);
+}
+
+static void
+handshake1_done (GObject * source, GAsyncResult * result, gpointer user_data)
+{
+  GOutputStream *os = G_OUTPUT_STREAM (source);
+  GTask *task = user_data;
+  GError *error = NULL;
+  gboolean res;
+
+  res = gst_rtmp_output_stream_write_all_bytes_finish (os, result, &error);
+  if (!res) {
+    GST_ERROR ("Failed to send C0+C1: %s", error->message);
+    g_task_return_error (task, error);
+    g_object_unref (task);
+    return;
+  }
+
+  GST_DEBUG ("Sent C0+C1");
+  handshake2 (task);
+}
+
+static void
+handshake2 (GTask * task)
+{
+  TaskData *data = g_task_get_task_data (task);
+  GInputStream *is =
+      g_io_stream_get_input_stream (G_IO_STREAM (data->socket_connection));
+
+  GST_DEBUG ("Waiting for S0+S2+S2");
+  gst_rtmp_input_stream_read_all_bytes_async (is, 1 + 1536 * 2,
+      G_PRIORITY_DEFAULT, g_task_get_cancellable (task), handshake2_done, task);
+}
+
+static void
+handshake2_done (GObject * source, GAsyncResult * result, gpointer user_data)
+{
+  GInputStream *is = G_INPUT_STREAM (source);
+  GTask *task = user_data;
+  GError *error = NULL;
+  GBytes *res;
+  const guint8 *data;
+  gsize size;
+
+  res = gst_rtmp_input_stream_read_all_bytes_finish (is, result, &error);
+  if (!res) {
+    GST_ERROR ("Failed to read S0+S1+S2: %s", error->message);
+    g_task_return_error (task, error);
+    g_object_unref (task);
+    return;
+  }
+
+  data = g_bytes_get_data (res, &size);
+  if (size < 1 + 1536 * 2) {
+    GST_ERROR ("Short read (want %d have %" G_GSIZE_FORMAT ")", 1 + 1536 * 2,
+        size);
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PARTIAL_INPUT,
+        "Short read (want %d have %" G_GSIZE_FORMAT ")", 1 + 1536 * 2, size);
+    g_object_unref (task);
+    return;
+  }
+
+  GST_DEBUG ("Got S0+S1+S2");
+  GST_MEMDUMP ("<<< S0", data, 1);
+  GST_MEMDUMP ("<<< S1", data + 1, 1536);
+  GST_MEMDUMP ("<<< S2", data + 1537, 1536);
+
+  handshake3 (task, data + 1);
+  g_bytes_unref (res);
+}
+
+static void
+handshake3 (GTask * task, const guint8 * s1)
+{
+  TaskData *data = g_task_get_task_data (task);
+  GOutputStream *os =
+      g_io_stream_get_output_stream (G_IO_STREAM (data->socket_connection));
+  GByteArray *ba = g_byte_array_sized_new (1536);
+  gint64 c2time = g_get_monotonic_time ();
+
+  g_byte_array_set_size (ba, 1536);
+  memcpy (ba->data, s1, 1536);  /* Copy S1 to C2 */
+  GST_WRITE_UINT32_BE (ba->data + 4, c2time / 1000);    /* C2 time2 */
+
+  GST_DEBUG ("Sending C2");
+  GST_MEMDUMP (">>> C2", ba->data, 1536);
+
+  gst_rtmp_output_stream_write_all_bytes_async (os,
+      g_byte_array_free_to_bytes (ba), G_PRIORITY_DEFAULT,
+      g_task_get_cancellable (task), handshake3_done, task);
+}
+
+static void
+handshake3_done (GObject * source, GAsyncResult * result, gpointer user_data)
+{
+  GOutputStream *os = G_OUTPUT_STREAM (source);
+  GTask *task = user_data;
+  TaskData *data = g_task_get_task_data (task);
+  GError *error = NULL;
+  gboolean res;
+
+  res = gst_rtmp_output_stream_write_all_bytes_finish (os, result, &error);
+  if (!res) {
+    GST_ERROR ("Failed to send C2: %s", error->message);
+    g_task_return_error (task, error);
+    g_object_unref (task);
+    return;
+  }
+
+  GST_DEBUG ("Sent C2, handshake finished");
+
+  data->rtmp_connection = gst_rtmp_connection_new (data->socket_connection);
+  data->rtmp_error_handler_id = g_signal_connect_object (data->rtmp_connection,
+      "error", G_CALLBACK (connection_error), task, 0);
+  g_clear_object (&data->socket_connection);
+
+  send_connect (task);
+}
+
+static void
+connection_error (GstRtmpConnection * connection, gpointer user_data)
 {
   GTask *task = user_data;
-  g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_CLOSED,
-      "read error during connection attempt");
+  g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+      "error during connection attempt");
 }
 
 static gchar *
@@ -327,7 +486,7 @@ do_adobe_auth (const gchar * username, const gchar * password,
 }
 
 static void
-send_connect (GTask * task, GstRtmpConnection * connection)
+send_connect (GTask * task)
 {
   TaskData *data = g_task_get_task_data (task);
   GstAmfNode *node;
@@ -355,16 +514,10 @@ send_connect (GTask * task, GstRtmpConnection * connection)
   gst_amf_node_append_field_take_string (node, g_strdup ("app"), appstr);
   gst_amf_node_append_field_take_string (node, g_strdup ("tcUrl"), uristr);
   gst_amf_node_append_field_string (node, "type", "nonprivate");
-  gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0");
+  //gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0");
 
-  // "fpad": False,
-  // "capabilities": 15,
-  // "audioCodecs": 3191,
-  // "videoCodecs": 252,
-  // "videoFunction": 1,
-
-  gst_rtmp_connection_send_command (connection, send_connect_done, task, 0,
-      "connect", node, NULL);
+  gst_rtmp_connection_send_command (data->rtmp_connection, send_connect_done,
+      task, 0, "connect", node, NULL);
 
   gst_amf_node_free (node);
   g_free (uri);
@@ -401,7 +554,7 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
 
   if (g_str_equal (code, "NetConnection.Connect.Success")) {
     node = gst_amf_node_get_field (optional_args, "secureToken");
-    send_secure_token_response (task, data->connection,
+    send_secure_token_response (task, data->rtmp_connection,
         node ? gst_amf_node_peek_string (node) : NULL);
     return;
   }
@@ -529,6 +682,75 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
   g_object_unref (task);
 }
 
+/* taken from librtmp */
+static gchar *
+rtmp_tea_decode (const gchar * key, const gchar * text)
+{
+  guint32 *v, k[4] = { 0 }, u;
+  guint32 z, y, sum = 0, e, DELTA = 0x9e3779b9;
+  gint32 p, q;
+  gint i, n;
+  guchar *ptr, *out;
+
+  /* prep key: pack 1st 16 chars into 4 LittleEndian ints */
+  ptr = (guchar *) key;
+  u = 0;
+  n = 0;
+  v = k;
+  p = strlen (key) > 16 ? 16 : strlen (key);
+  for (i = 0; i < p; i++) {
+    u |= ptr[i] << (n * 8);
+    if (n == 3) {
+      *v++ = u;
+      u = 0;
+      n = 0;
+    } else {
+      n++;
+    }
+  }
+  /* any trailing chars */
+  if (u)
+    *v = u;
+
+  /* prep text: hex2bin, multiples of 4 */
+  n = (strlen (text) + 7) / 8;
+  out = malloc (n * 8);
+  ptr = (guchar *) text;
+  v = (guint32 *) out;
+  for (i = 0; i < n; i++) {
+    u = (g_ascii_xdigit_value (ptr[0]) << 4) + g_ascii_xdigit_value (ptr[1]);
+    u |= ((g_ascii_xdigit_value (ptr[2]) << 4) +
+        g_ascii_xdigit_value (ptr[3])) << 8;
+    u |= ((g_ascii_xdigit_value (ptr[4]) << 4) +
+        g_ascii_xdigit_value (ptr[5])) << 16;
+    u |= ((g_ascii_xdigit_value (ptr[6]) << 4) +
+        g_ascii_xdigit_value (ptr[7])) << 24;
+    *v++ = u;
+    ptr += 8;
+  }
+  v = (guint32 *) out;
+
+  /* http://www.movable-type.co.uk/scripts/tea-block.html */
+  z = v[n - 1];
+  y = v[0];
+  q = 6 + 52 / n;
+  sum = q * DELTA;
+  while (sum != 0) {
+    e = sum >> 2 & 3;
+    for (p = n - 1; p > 0; p--)
+      z = v[p - 1], y = v[p] -=
+          (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) ^ ((sum ^ y) +
+          (k[(p & 3) ^ e] ^ z));
+    z = v[n - 1];
+    y = v[0] -=
+        (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) ^ ((sum ^ y) +
+        (k[(p & 3) ^ e] ^ z));
+    sum -= DELTA;
+  }
+
+  return (gchar *) out;
+}
+
 static void
 send_secure_token_response (GTask * task, GstRtmpConnection * connection,
     const gchar * challenge)
@@ -546,7 +768,7 @@ send_secure_token_response (GTask * task, GstRtmpConnection * connection,
       return;
     }
 
-    response = gst_rtmp_tea_decode (data->location.secure_token, challenge);
+    response = rtmp_tea_decode (data->location.secure_token, challenge);
 
     GST_DEBUG ("response: %s", response);
 
@@ -558,8 +780,8 @@ send_secure_token_response (GTask * task, GstRtmpConnection * connection,
     gst_amf_node_free (node2);
   }
 
-  g_signal_handler_disconnect (connection, data->id_connection_closed_cb);
-  data->id_connection_closed_cb = 0;
+  g_signal_handler_disconnect (connection, data->rtmp_error_handler_id);
+  data->rtmp_error_handler_id = 0;
 
   g_task_return_pointer (task, g_object_ref (connection),
       gst_rtmp_connection_close_and_unref);
