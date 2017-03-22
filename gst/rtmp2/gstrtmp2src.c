@@ -610,13 +610,13 @@ uninteresting:
 }
 
 static void
-connection_closed (GstRtmpConnection * connection, GstRtmp2Src * rtmp2src)
+connection_error (GstRtmpConnection * connection, GstRtmp2Src * rtmp2src)
 {
   g_mutex_lock (&rtmp2src->lock);
   if (rtmp2src->connect_task) {
     g_cancellable_cancel (g_task_get_cancellable (rtmp2src->connect_task));
   } else if (rtmp2src->task_main_loop) {
-    GST_INFO_OBJECT (rtmp2src, "Connection got closed");
+    GST_INFO_OBJECT (rtmp2src, "Connection error");
     gst_task_stop (rtmp2src->task);
     g_main_loop_quit (rtmp2src->task_main_loop);
   }
@@ -640,8 +640,8 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
   if (rtmp2src->connection) {
     gst_rtmp_connection_set_input_handler (rtmp2src->connection,
         got_chunk, g_object_ref (rtmp2src), g_object_unref);
-    g_signal_connect_object (rtmp2src->connection, "closed",
-        G_CALLBACK (connection_closed), rtmp2src, 0);
+    g_signal_connect_object (rtmp2src->connection, "error",
+        G_CALLBACK (connection_error), rtmp2src, 0);
   } else {
     if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
       GST_ELEMENT_ERROR (rtmp2src, RESOURCE, NOT_AUTHORIZED,
