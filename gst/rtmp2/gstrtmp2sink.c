@@ -743,8 +743,7 @@ new_connect (GstRtmp2Sink * rtmp2sink)
 }
 
 static void
-put_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
-    gpointer user_data)
+put_chunk (GstRtmpConnection * connection, gpointer user_data)
 {
   GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (user_data);
 
@@ -754,14 +753,14 @@ put_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 }
 
 static void
-connection_closed (GstRtmpConnection * connection, GstRtmp2Sink * rtmp2sink)
+connection_error (GstRtmpConnection * connection, GstRtmp2Sink * rtmp2sink)
 {
   g_mutex_lock (&rtmp2sink->lock);
   if (rtmp2sink->connect_task) {
     g_cancellable_cancel (g_task_get_cancellable (rtmp2sink->connect_task));
   } else if (rtmp2sink->task_main_loop) {
     GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, WRITE,
-        ("Connection got closed"), (NULL));
+        ("Connection error"), (NULL));
     gst_task_stop (rtmp2sink->task);
     g_main_loop_quit (rtmp2sink->task_main_loop);
   }
@@ -785,8 +784,8 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
   if (rtmp2sink->connection) {
     gst_rtmp_connection_set_output_handler (rtmp2sink->connection,
         put_chunk, g_object_ref (rtmp2sink), g_object_unref);
-    g_signal_connect_object (rtmp2sink->connection, "closed",
-        G_CALLBACK (connection_closed), rtmp2sink, 0);
+    g_signal_connect_object (rtmp2sink->connection, "error",
+        G_CALLBACK (connection_error), rtmp2sink, 0);
   } else {
     if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
       GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, NOT_AUTHORIZED,

@@ -20,17 +20,27 @@
 #ifndef _GST_RTMP_UTILS_H_
 #define _GST_RTMP_UTILS_H_
 
-#include <glib.h>
+#include <gio/gio.h>
 #include "rtmpchunk.h"
 
 G_BEGIN_DECLS
 
 #define GST_RTMP_DEFAULT_PORT 1935
+#define GST_RTMP_DEFAULT_CHUNK_SIZE 128
 
-GBytes *gst_rtmp_bytes_remove (GBytes *bytes, gsize size);
-gchar * gst_rtmp_hexify (const guint8 *src, gsize size);
-guint8 * gst_rtmp_unhexify (const char *src, gsize *size);
-gchar * gst_rtmp_tea_decode (const gchar *key, const gchar *text);
+void gst_rtmp_dump_bytes (const gchar * string, GBytes * bytes);
+
+void gst_rtmp_input_stream_read_all_bytes_async (GInputStream * stream,
+    gsize count, int io_priority, GCancellable * cancellable,
+    GAsyncReadyCallback callback, gpointer user_data);
+GBytes * gst_rtmp_input_stream_read_all_bytes_finish (GInputStream * stream,
+    GAsyncResult * result, GError ** error);
+
+void gst_rtmp_output_stream_write_all_bytes_async (GOutputStream * stream,
+    GBytes * bytes, int io_priority, GCancellable * cancellable,
+    GAsyncReadyCallback callback, gpointer user_data);
+gboolean gst_rtmp_output_stream_write_all_bytes_finish (GOutputStream * stream,
+    GAsyncResult * result, GError ** error);
 
 G_END_DECLS
 

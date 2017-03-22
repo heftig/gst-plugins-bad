@@ -36,6 +36,8 @@ G_BEGIN_DECLS
 typedef struct _GstRtmpConnection GstRtmpConnection;
 typedef struct _GstRtmpConnectionClass GstRtmpConnectionClass;
 
+typedef void (*GstRtmpConnectionFunc)
+    (GstRtmpConnection * connection, gpointer user_data);
 typedef void (*GstRtmpConnectionChunkFunc)
     (GstRtmpConnection * connection, GstRtmpChunk * chunk, gpointer user_data);
 
@@ -53,11 +55,11 @@ void gst_rtmp_connection_set_input_handler (GstRtmpConnection * connection,
     GDestroyNotify user_data_destroy);
 
 void gst_rtmp_connection_set_output_handler (GstRtmpConnection * connection,
-    GstRtmpConnectionChunkFunc callback, gpointer user_data,
+    GstRtmpConnectionFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy);
 
-void gst_rtmp_connection_start_handshake (GstRtmpConnection * connection);
-
+void gst_rtmp_connection_queue_bytes (GstRtmpConnection *self,
+    GBytes * bytes);
 void gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
     GstRtmpChunk * chunk);
 guint gst_rtmp_connection_get_num_queued (GstRtmpConnection * connection);

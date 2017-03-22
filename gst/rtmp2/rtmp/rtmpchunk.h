@@ -82,16 +82,6 @@ typedef enum {
   GST_RTMP_MESSAGE_TYPE_AGGREGATE = 22,
 } GstRtmpMessageType;
 
-typedef enum {
-  GST_RTMP_USER_CONTROL_STREAM_BEGIN = 0,
-  GST_RTMP_USER_CONTROL_STREAM_EOF = 1,
-  GST_RTMP_USER_CONTROL_STREAM_DRY = 2,
-  GST_RTMP_USER_CONTROL_SET_BUFFER_LENGTH = 3,
-  GST_RTMP_USER_CONTROL_STREAM_IS_RECORDED = 4,
-  GST_RTMP_USER_CONTROL_PING_REQUEST = 6,
-  GST_RTMP_USER_CONTROL_PING_RESPONSE = 7,
-} GstRtmpUserControl;
-
 GstRtmpChunk *gst_rtmp_chunk_new (void);
 void gst_rtmp_chunk_free (gpointer ptr);
 GBytes * gst_rtmp_chunk_serialize (GstRtmpChunk *chunk,
