@@ -69,10 +69,11 @@ struct _GstRtmp2Sink
   /* stuff */
   GMutex lock;
   GCond cond;
-  gboolean flushing;
+  gboolean running, flushing;
   GstTask *task;
   GRecMutex task_lock;
   GMainLoop *task_main_loop;
+  GMainContext *task_main_context;
   GPtrArray *headers;
 
   GTask *connect_task;
@@ -372,9 +373,17 @@ gst_rtmp2_sink_start (GstBaseSink * sink)
 
   GST_DEBUG_OBJECT (rtmp2sink, "start");
 
+  rtmp2sink->running = TRUE;
   gst_task_start (rtmp2sink->task);
 
   return TRUE;
+}
+
+static gboolean
+stop_main_loop (gpointer user_data)
+{
+  g_main_loop_quit (user_data);
+  return G_SOURCE_REMOVE;
 }
 
 static gboolean
@@ -385,16 +394,19 @@ gst_rtmp2_sink_stop (GstBaseSink * sink)
   GST_DEBUG_OBJECT (rtmp2sink, "stop");
 
   g_mutex_lock (&rtmp2sink->lock);
+
+  gst_task_stop (rtmp2sink->task);
+  rtmp2sink->running = FALSE;
+
   if (rtmp2sink->connect_task) {
     g_cancellable_cancel (g_task_get_cancellable (rtmp2sink->connect_task));
   }
-  gst_task_stop (rtmp2sink->task);
   if (rtmp2sink->task_main_loop) {
-    g_main_loop_quit (rtmp2sink->task_main_loop);
+    g_main_context_invoke (rtmp2sink->task_main_context, stop_main_loop,
+        rtmp2sink->task_main_loop);
   }
 
-  g_ptr_array_set_size (rtmp2sink->headers, 0);
-
+  g_cond_broadcast (&rtmp2sink->cond);
   g_mutex_unlock (&rtmp2sink->lock);
 
   gst_task_join (rtmp2sink->task);
@@ -413,7 +425,7 @@ gst_rtmp2_sink_unlock (GstBaseSink * sink)
 
   g_mutex_lock (&rtmp2sink->lock);
   rtmp2sink->flushing = TRUE;
-  g_cond_signal (&rtmp2sink->cond);
+  g_cond_broadcast (&rtmp2sink->cond);
   g_mutex_unlock (&rtmp2sink->lock);
 
   return TRUE;
@@ -683,10 +695,9 @@ gst_rtmp2_sink_task (gpointer user_data)
 
   GST_DEBUG ("gst_rtmp2_sink_task starting");
 
-  main_context = g_main_context_new ();
-  g_main_context_push_thread_default (main_context);
-
   g_mutex_lock (&rtmp2sink->lock);
+  main_context = rtmp2sink->task_main_context = g_main_context_new ();
+  g_main_context_push_thread_default (main_context);
   main_loop = rtmp2sink->task_main_loop = g_main_loop_new (main_context, TRUE);
   new_connect (rtmp2sink);
   g_mutex_unlock (&rtmp2sink->lock);
@@ -696,7 +707,7 @@ gst_rtmp2_sink_task (gpointer user_data)
   g_mutex_lock (&rtmp2sink->lock);
   g_clear_pointer (&rtmp2sink->task_main_loop, g_main_loop_unref);
   g_clear_pointer (&rtmp2sink->connection, gst_rtmp_connection_close_and_unref);
-  g_cond_signal (&rtmp2sink->cond);
+  g_cond_broadcast (&rtmp2sink->cond);
   g_mutex_unlock (&rtmp2sink->lock);
 
   while (g_main_context_pending (main_context)) {
@@ -705,7 +716,11 @@ gst_rtmp2_sink_task (gpointer user_data)
   }
 
   g_main_context_pop_thread_default (main_context);
-  g_main_context_unref (main_context);
+
+  g_mutex_lock (&rtmp2sink->lock);
+  g_clear_pointer (&rtmp2sink->task_main_context, g_main_context_unref);
+  g_ptr_array_set_size (rtmp2sink->headers, 0);
+  g_mutex_unlock (&rtmp2sink->lock);
 
   GST_DEBUG ("gst_rtmp2_sink_task exiting");
 }
