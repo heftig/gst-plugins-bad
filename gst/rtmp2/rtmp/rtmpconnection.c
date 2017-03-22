@@ -33,7 +33,7 @@
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_connection_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_connection_debug_category
 
-#define READ_SIZE 4096
+#define READ_SIZE 8192
 
 typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection * connection);
 
