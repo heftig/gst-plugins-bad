@@ -68,9 +68,10 @@ struct _GstRtmp2Src
   GMutex lock;
   GCond cond;
   GstRtmpChunk *chunk;
-  gboolean flushing;
+  gboolean running, flushing;
   GstTask *task;
   GRecMutex task_lock;
+  GMainContext *task_main_context;
   GMainLoop *task_main_loop;
 
   GTask *connect_task;
@@ -365,10 +366,17 @@ gst_rtmp2_src_start (GstBaseSrc * src)
   GST_DEBUG_OBJECT (rtmp2src, "start");
 
   rtmp2src->sent_header = FALSE;
-
+  rtmp2src->running = TRUE;
   gst_task_start (rtmp2src->task);
 
   return TRUE;
+}
+
+static gboolean
+stop_main_loop (gpointer user_data)
+{
+  g_main_loop_quit (user_data);
+  return G_SOURCE_REMOVE;
 }
 
 static gboolean
@@ -379,13 +387,18 @@ gst_rtmp2_src_stop (GstBaseSrc * src)
   GST_DEBUG_OBJECT (rtmp2src, "stop");
 
   g_mutex_lock (&rtmp2src->lock);
+
+  gst_task_stop (rtmp2src->task);
+  rtmp2src->running = FALSE;
+
   if (rtmp2src->connect_task) {
     g_cancellable_cancel (g_task_get_cancellable (rtmp2src->connect_task));
   }
-  gst_task_stop (rtmp2src->task);
   if (rtmp2src->task_main_loop) {
-    g_main_loop_quit (rtmp2src->task_main_loop);
+    g_main_context_invoke (rtmp2src->task_main_context, stop_main_loop,
+        rtmp2src->task_main_loop);
   }
+
   g_cond_broadcast (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
 
@@ -501,10 +514,9 @@ gst_rtmp2_src_task (gpointer user_data)
 
   GST_DEBUG ("gst_rtmp2_src_task starting");
 
-  main_context = g_main_context_new ();
-  g_main_context_push_thread_default (main_context);
-
   g_mutex_lock (&rtmp2src->lock);
+  main_context = rtmp2src->task_main_context = g_main_context_new ();
+  g_main_context_push_thread_default (main_context);
   main_loop = rtmp2src->task_main_loop = g_main_loop_new (main_context, TRUE);
   new_connect (rtmp2src);
   g_mutex_unlock (&rtmp2src->lock);
@@ -523,9 +535,9 @@ gst_rtmp2_src_task (gpointer user_data)
   }
 
   g_main_context_pop_thread_default (main_context);
-  g_main_context_unref (main_context);
 
   g_mutex_lock (&rtmp2src->lock);
+  g_clear_pointer (&rtmp2src->task_main_context, g_main_context_unref);
   g_clear_pointer (&rtmp2src->chunk, gst_rtmp_chunk_free);
   g_mutex_unlock (&rtmp2src->lock);
 
@@ -577,7 +589,7 @@ got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 
   g_mutex_lock (&rtmp2src->lock);
   while (rtmp2src->chunk) {
-    if (!g_main_loop_is_running (rtmp2src->task_main_loop)) {
+    if (!rtmp2src->running) {
       g_mutex_unlock (&rtmp2src->lock);
       gst_rtmp_chunk_free (chunk);
       return;
