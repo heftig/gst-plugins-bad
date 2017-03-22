@@ -168,6 +168,11 @@ select_message_header_fmt (GstRtmpChunk * chunk,
   g_return_val_if_fail (previous_header->chunk_stream_id ==
       chunk->chunk_stream_id, 0);
 
+  if (previous_header->format == -1) {
+    GST_DEBUG ("picking chunk header 0: new stream");
+    return 0;
+  }
+
   if (previous_header->stream_id != chunk->stream_id) {
     GST_DEBUG ("picking chunk header 0: stream-id mismatch; "
         "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
@@ -344,5 +349,6 @@ gst_rtmp_chunk_cache_get (GstRtmpChunkCache * cache, guint32 chunk_stream_id)
   g_array_set_size (cache, i + 1);
   entry = &g_array_index (cache, GstRtmpChunkCacheEntry, i);
   entry->previous_header.chunk_stream_id = chunk_stream_id;
+  entry->previous_header.format = -1;
   return entry;
 }
