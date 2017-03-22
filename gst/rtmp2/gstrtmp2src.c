@@ -386,6 +386,7 @@ gst_rtmp2_src_stop (GstBaseSrc * src)
   if (rtmp2src->task_main_loop) {
     g_main_loop_quit (rtmp2src->task_main_loop);
   }
+  g_cond_broadcast (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
 
   gst_task_join (rtmp2src->task);
@@ -576,7 +577,7 @@ got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
 
   g_mutex_lock (&rtmp2src->lock);
   while (rtmp2src->chunk) {
-    if (rtmp2src->flushing) {
+    if (!g_main_loop_is_running (rtmp2src->task_main_loop)) {
       g_mutex_unlock (&rtmp2src->lock);
       gst_rtmp_chunk_free (chunk);
       return;
