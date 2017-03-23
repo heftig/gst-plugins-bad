@@ -369,7 +369,7 @@ send_connect (GTask * task)
   gst_amf_node_append_field_take_string (node, g_strdup ("app"), appstr);
   gst_amf_node_append_field_take_string (node, g_strdup ("tcUrl"), uristr);
   gst_amf_node_append_field_string (node, "type", "nonprivate");
-  //gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0");
+  gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0");
 
   gst_rtmp_connection_send_command (data->connection, send_connect_done,
       task, 0, "connect", node, NULL);
