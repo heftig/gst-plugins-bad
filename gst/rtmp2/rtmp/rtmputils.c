@@ -104,8 +104,6 @@ read_all_bytes_done (GObject * source, GAsyncResult * result,
   g_byte_array_set_size (ba, bytes_read);
   bytes = g_byte_array_free_to_bytes (g_byte_array_ref (ba));
 
-  gst_rtmp_dump_bytes ("<<< data", bytes);
-
   g_task_return_pointer (task, bytes, (GDestroyNotify) g_bytes_unref);
   g_object_unref (task);
 }
@@ -129,8 +127,6 @@ gst_rtmp_output_stream_write_all_bytes_async (GOutputStream * stream,
 
   g_return_if_fail (G_IS_OUTPUT_STREAM (stream));
   g_return_if_fail (bytes);
-
-  gst_rtmp_dump_bytes (">>> data", bytes);
 
   data = g_bytes_get_data (bytes, &size);
   g_return_if_fail (data);
