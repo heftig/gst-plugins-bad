@@ -589,8 +589,6 @@ parse_ecma_array (AmfParser * parser, GstAmfNode * node)
    * was 0, but the number of elements was 1. */
   if (n_elements == 0) {
     n_elements = 1;
-  } else {
-    GST_ERROR ("unimplemented, n_elements > 0: %" G_GUINT32_FORMAT, n_elements);
   }
 
   n_read = parse_object (parser, node);
