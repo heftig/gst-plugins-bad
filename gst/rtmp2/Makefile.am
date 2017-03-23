@@ -9,6 +9,7 @@ libgstrtmp2_la_SOURCES = \
 	rtmp/rtmpchunk.c \
 	rtmp/rtmpclient.c \
 	rtmp/rtmpconnection.c \
+	rtmp/rtmphandshake.c \
 	rtmp/rtmputils.c \
 	$(NULL)
 
@@ -39,5 +40,6 @@ noinst_HEADERS = \
 	rtmp/rtmpclient.h \
 	rtmp/rtmpconnection.h \
 	rtmp/rtmpdebug.h \
+	rtmp/rtmphandshake.h \
 	rtmp/rtmputils.h \
 	$(NULL)

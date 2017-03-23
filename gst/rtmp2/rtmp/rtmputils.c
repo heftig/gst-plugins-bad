@@ -45,6 +45,24 @@ gst_rtmp_dump_bytes (const gchar * string, GBytes * bytes)
 }
 
 void
+gst_rtmp_byte_array_append_bytes (GByteArray * bytearray, GBytes * bytes)
+{
+  const guint8 *data;
+  gsize size;
+  guint offset;
+
+  g_return_if_fail (bytearray);
+
+  offset = bytearray->len;
+  data = g_bytes_get_data (bytes, &size);
+
+  g_return_if_fail (data);
+
+  g_byte_array_set_size (bytearray, offset + size);
+  memcpy (bytearray->data + offset, data, size);
+}
+
+void
 gst_rtmp_input_stream_read_all_bytes_async (GInputStream * stream, gsize count,
     int io_priority, GCancellable * cancellable, GAsyncReadyCallback callback,
     gpointer user_data)
