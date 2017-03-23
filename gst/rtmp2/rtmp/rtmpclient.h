@@ -25,8 +25,10 @@
 #include <rtmp/rtmpconnection.h>
 
 G_BEGIN_DECLS
+
 #define GST_TYPE_RTMP_AUTHMOD (gst_rtmp_authmod_get_type ())
-    typedef enum
+
+typedef enum
 {
   GST_RTMP_AUTHMOD_NONE = 0,
   GST_RTMP_AUTHMOD_AUTO,
