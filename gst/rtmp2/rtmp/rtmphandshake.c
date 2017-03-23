@@ -204,6 +204,8 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
     return;
   }
 
+  GST_DEBUG ("S2 random data matches C1");
+
   ba = g_byte_array_sized_new (1536);
   g_byte_array_set_size (ba, 1536);
 
