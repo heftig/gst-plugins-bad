@@ -776,6 +776,9 @@ play_done (const gchar * command_name, GPtrArray * args, gpointer user_data)
         GST_DEBUG_OBJECT (rtmp2src, "play success, code=%s", code);
         g_task_return_pointer (task, g_object_ref (connection),
             gst_rtmp_connection_close_and_unref);
+      } else if (g_str_equal (code, "NetStream.Play.StreamNotFound")) {
+        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+            "Stream not found! (%s)", code);
       } else {
         g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
             "unhandled play result code: %s", GST_STR_NULL (code));
