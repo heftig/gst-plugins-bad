@@ -691,7 +691,8 @@ gst_amf_parse_command (GBytes * bytes, gdouble * transaction_id,
 
   if (args->len == 0) {
     GST_ERROR ("no command arguments");
-    g_ptr_array_free (args, TRUE);
+    g_clear_pointer (&args, g_ptr_array_unref);
+    goto out;
   }
 
   if (command_name) {
