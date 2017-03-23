@@ -708,7 +708,7 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstRtmpChunk * chunk)
   }
 
   g_free (command_name);
-  g_ptr_array_free (args, TRUE);
+  g_ptr_array_unref (args);
 }
 
 static void
