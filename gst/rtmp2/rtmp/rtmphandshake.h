@@ -1,5 +1,5 @@
 /* GStreamer RTMP Library
- * Copyright (C) 2013 David Schleef <ds@schleef.org>
+ * Copyright (C) 2017 Make.TV, Inc. <info@make.tv>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,33 +17,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef _GST_RTMP_UTILS_H_
-#define _GST_RTMP_UTILS_H_
+#ifndef _GST_RTMP_HANDSHAKE_H_
+#define _GST_RTMP_HANDSHAKE_H_
 
 #include <gio/gio.h>
-#include "rtmpchunk.h"
 
 G_BEGIN_DECLS
 
-#define GST_RTMP_DEFAULT_PORT 1935
-#define GST_RTMP_DEFAULT_CHUNK_SIZE 128
-
-void gst_rtmp_dump_bytes (const gchar * string, GBytes * bytes);
-
-void gst_rtmp_byte_array_append_bytes (GByteArray * bytearray, GBytes * bytes);
-
-void gst_rtmp_input_stream_read_all_bytes_async (GInputStream * stream,
-    gsize count, int io_priority, GCancellable * cancellable,
+void gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
     GAsyncReadyCallback callback, gpointer user_data);
-GBytes * gst_rtmp_input_stream_read_all_bytes_finish (GInputStream * stream,
-    GAsyncResult * result, GError ** error);
-
-void gst_rtmp_output_stream_write_all_bytes_async (GOutputStream * stream,
-    GBytes * bytes, int io_priority, GCancellable * cancellable,
-    GAsyncReadyCallback callback, gpointer user_data);
-gboolean gst_rtmp_output_stream_write_all_bytes_finish (GOutputStream * stream,
+gboolean gst_rtmp_client_handshake_finish (GIOStream * stream,
     GAsyncResult * result, GError ** error);
 
 G_END_DECLS
-
 #endif

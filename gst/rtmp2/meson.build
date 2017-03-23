@@ -7,6 +7,7 @@ rtmp2_sources = [
   'rtmp/rtmpchunk.c',
   'rtmp/rtmpclient.c',
   'rtmp/rtmpconnection.c',
+  'rtmp/rtmphandshake.c',
   'rtmp/rtmputils.c',
 ]
 

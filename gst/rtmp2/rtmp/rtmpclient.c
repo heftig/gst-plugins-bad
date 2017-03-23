@@ -26,6 +26,7 @@
 #include <gio/gio.h>
 #include <string.h>
 #include "rtmpclient.h"
+#include "rtmphandshake.h"
 #include "rtmputils.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_client_debug_category);
@@ -34,14 +35,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_rtmp_client_debug_category);
 static void socket_connect (GTask * task);
 static void socket_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
-static void handshake1 (GTask * task);
-static void handshake1_done (GObject * source, GAsyncResult * result,
-    gpointer user_data);
-static void handshake2 (GTask * task);
-static void handshake2_done (GObject * source, GAsyncResult * result,
-    gpointer user_data);
-static void handshake3 (GTask * task, const guint8 * s1);
-static void handshake3_done (GObject * source, GAsyncResult * result,
+static void handshake_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
 static void send_connect (GTask * task);
 static void send_connect_done (const gchar * command_name, GPtrArray * args,
@@ -110,9 +104,8 @@ typedef struct
 {
   GstRtmpLocation location;
   gchar *auth_query;
-  GSocketConnection *socket_connection;
-  GstRtmpConnection *rtmp_connection;
-  gulong rtmp_error_handler_id;
+  GstRtmpConnection *connection;
+  gulong error_handler_id;
 } TaskData;
 
 static TaskData *
@@ -129,12 +122,10 @@ task_data_free (gpointer ptr)
   TaskData *data = ptr;
   gst_rtmp_location_clear (&data->location);
   g_clear_pointer (&data->auth_query, g_free);
-  if (data->rtmp_error_handler_id) {
-    g_signal_handler_disconnect (data->rtmp_connection,
-        data->rtmp_error_handler_id);
+  if (data->error_handler_id) {
+    g_signal_handler_disconnect (data->connection, data->error_handler_id);
   }
-  g_clear_object (&data->rtmp_connection);
-  g_clear_object (&data->socket_connection);
+  g_clear_object (&data->connection);
   g_slice_free (TaskData, data);
 }
 
@@ -204,21 +195,14 @@ socket_connect (GTask * task)
     data->location.timeout = DEFAULT_TIMEOUT;
   }
 
-  if (data->rtmp_error_handler_id) {
-    g_signal_handler_disconnect (data->rtmp_connection,
-        data->rtmp_error_handler_id);
-    data->rtmp_error_handler_id = 0;
+  if (data->error_handler_id) {
+    g_signal_handler_disconnect (data->connection, data->error_handler_id);
+    data->error_handler_id = 0;
   }
 
-  if (data->rtmp_connection) {
-    gst_rtmp_connection_close (data->rtmp_connection);
-    g_clear_object (&data->rtmp_connection);
-  }
-
-  if (data->socket_connection) {
-    g_io_stream_close_async (G_IO_STREAM (data->socket_connection),
-        G_PRIORITY_DEFAULT, NULL, NULL, NULL);
-    g_clear_object (&data->socket_connection);
+  if (data->connection) {
+    gst_rtmp_connection_close (data->connection);
+    g_clear_object (&data->connection);
   }
 
   addr = g_network_address_new (data->location.host, data->location.port);
@@ -238,11 +222,11 @@ socket_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data)
 {
   GSocketClient *socket_client = G_SOCKET_CLIENT (source);
+  GSocketConnection *socket_connection;
   GTask *task = user_data;
-  TaskData *data = g_task_get_task_data (task);
   GError *error = NULL;
 
-  data->socket_connection =
+  socket_connection =
       g_socket_client_connect_finish (socket_client, result, &error);
 
   if (g_task_return_error_if_cancelled (task)) {
@@ -251,7 +235,7 @@ socket_connect_done (GObject * source, GAsyncResult * result,
     return;
   }
 
-  if (data->socket_connection == NULL) {
+  if (socket_connection == NULL) {
     GST_ERROR ("Socket connection error");
     g_task_return_error (task, error);
     g_object_unref (task);
@@ -260,162 +244,33 @@ socket_connect_done (GObject * source, GAsyncResult * result,
 
   GST_DEBUG ("Socket connection established");
 
-  handshake1 (task);
+  gst_rtmp_client_handshake (G_IO_STREAM (socket_connection),
+      g_task_get_cancellable (task), handshake_done, task);
+  g_object_unref (socket_connection);
 }
 
-static inline void
-serialize_u8 (GByteArray * array, guint8 value)
-{
-  g_byte_array_append (array, (guint8 *) & value, sizeof value);
-}
-
-static inline void
-serialize_u32 (GByteArray * array, guint32 value)
-{
-  value = GUINT32_TO_BE (value);
-  g_byte_array_append (array, (guint8 *) & value, sizeof value);
-}
 
 static void
-handshake1 (GTask * task)
+handshake_done (GObject * source, GAsyncResult * result, gpointer user_data)
 {
-  TaskData *data = g_task_get_task_data (task);
-  GOutputStream *os =
-      g_io_stream_get_output_stream (G_IO_STREAM (data->socket_connection));
-  GByteArray *ba = g_byte_array_sized_new (1 + 1536);
-  gint i;
-
-  serialize_u8 (ba, 3);         /* C0 version */
-  serialize_u32 (ba, g_get_monotonic_time () / 1000);   /* C1 time */
-  serialize_u32 (ba, 0);        /* C1 zero */
-
-  /* C1 random data */
-  for (i = 0; i < 1528; i += sizeof (guint32)) {
-    serialize_u32 (ba, g_random_int ());
-  }
-
-  GST_DEBUG ("Sending C0+C1");
-  GST_MEMDUMP (">>> C0", ba->data, 1);
-  GST_MEMDUMP (">>> C1", ba->data + 1, 1536);
-
-  gst_rtmp_output_stream_write_all_bytes_async (os,
-      g_byte_array_free_to_bytes (ba), G_PRIORITY_DEFAULT,
-      g_task_get_cancellable (task), handshake1_done, task);
-}
-
-static void
-handshake1_done (GObject * source, GAsyncResult * result, gpointer user_data)
-{
-  GOutputStream *os = G_OUTPUT_STREAM (source);
-  GTask *task = user_data;
-  GError *error = NULL;
-  gboolean res;
-
-  res = gst_rtmp_output_stream_write_all_bytes_finish (os, result, &error);
-  if (!res) {
-    GST_ERROR ("Failed to send C0+C1: %s", error->message);
-    g_task_return_error (task, error);
-    g_object_unref (task);
-    return;
-  }
-
-  GST_DEBUG ("Sent C0+C1");
-  handshake2 (task);
-}
-
-static void
-handshake2 (GTask * task)
-{
-  TaskData *data = g_task_get_task_data (task);
-  GInputStream *is =
-      g_io_stream_get_input_stream (G_IO_STREAM (data->socket_connection));
-
-  GST_DEBUG ("Waiting for S0+S2+S2");
-  gst_rtmp_input_stream_read_all_bytes_async (is, 1 + 1536 * 2,
-      G_PRIORITY_DEFAULT, g_task_get_cancellable (task), handshake2_done, task);
-}
-
-static void
-handshake2_done (GObject * source, GAsyncResult * result, gpointer user_data)
-{
-  GInputStream *is = G_INPUT_STREAM (source);
-  GTask *task = user_data;
-  GError *error = NULL;
-  GBytes *res;
-  const guint8 *data;
-  gsize size;
-
-  res = gst_rtmp_input_stream_read_all_bytes_finish (is, result, &error);
-  if (!res) {
-    GST_ERROR ("Failed to read S0+S1+S2: %s", error->message);
-    g_task_return_error (task, error);
-    g_object_unref (task);
-    return;
-  }
-
-  data = g_bytes_get_data (res, &size);
-  if (size < 1 + 1536 * 2) {
-    GST_ERROR ("Short read (want %d have %" G_GSIZE_FORMAT ")", 1 + 1536 * 2,
-        size);
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PARTIAL_INPUT,
-        "Short read (want %d have %" G_GSIZE_FORMAT ")", 1 + 1536 * 2, size);
-    g_object_unref (task);
-    return;
-  }
-
-  GST_DEBUG ("Got S0+S1+S2");
-  GST_MEMDUMP ("<<< S0", data, 1);
-  GST_MEMDUMP ("<<< S1", data + 1, 1536);
-  GST_MEMDUMP ("<<< S2", data + 1537, 1536);
-
-  handshake3 (task, data + 1);
-  g_bytes_unref (res);
-}
-
-static void
-handshake3 (GTask * task, const guint8 * s1)
-{
-  TaskData *data = g_task_get_task_data (task);
-  GOutputStream *os =
-      g_io_stream_get_output_stream (G_IO_STREAM (data->socket_connection));
-  GByteArray *ba = g_byte_array_sized_new (1536);
-  gint64 c2time = g_get_monotonic_time ();
-
-  g_byte_array_set_size (ba, 1536);
-  memcpy (ba->data, s1, 1536);  /* Copy S1 to C2 */
-  GST_WRITE_UINT32_BE (ba->data + 4, c2time / 1000);    /* C2 time2 */
-
-  GST_DEBUG ("Sending C2");
-  GST_MEMDUMP (">>> C2", ba->data, 1536);
-
-  gst_rtmp_output_stream_write_all_bytes_async (os,
-      g_byte_array_free_to_bytes (ba), G_PRIORITY_DEFAULT,
-      g_task_get_cancellable (task), handshake3_done, task);
-}
-
-static void
-handshake3_done (GObject * source, GAsyncResult * result, gpointer user_data)
-{
-  GOutputStream *os = G_OUTPUT_STREAM (source);
+  GIOStream *stream = G_IO_STREAM (source);
+  GSocketConnection *socket_connection = G_SOCKET_CONNECTION (stream);
   GTask *task = user_data;
   TaskData *data = g_task_get_task_data (task);
   GError *error = NULL;
   gboolean res;
 
-  res = gst_rtmp_output_stream_write_all_bytes_finish (os, result, &error);
+  res = gst_rtmp_client_handshake_finish (stream, result, &error);
   if (!res) {
-    GST_ERROR ("Failed to send C2: %s", error->message);
+    g_io_stream_close_async (stream, G_PRIORITY_DEFAULT, NULL, NULL, NULL);
     g_task_return_error (task, error);
     g_object_unref (task);
     return;
   }
 
-  GST_DEBUG ("Sent C2, handshake finished");
-
-  data->rtmp_connection = gst_rtmp_connection_new (data->socket_connection);
-  data->rtmp_error_handler_id = g_signal_connect_object (data->rtmp_connection,
+  data->connection = gst_rtmp_connection_new (socket_connection);
+  data->error_handler_id = g_signal_connect_object (data->connection,
       "error", G_CALLBACK (connection_error), task, 0);
-  g_clear_object (&data->socket_connection);
 
   send_connect (task);
 }
@@ -516,7 +371,7 @@ send_connect (GTask * task)
   gst_amf_node_append_field_string (node, "type", "nonprivate");
   //gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0");
 
-  gst_rtmp_connection_send_command (data->rtmp_connection, send_connect_done,
+  gst_rtmp_connection_send_command (data->connection, send_connect_done,
       task, 0, "connect", node, NULL);
 
   gst_amf_node_free (node);
@@ -554,7 +409,7 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
 
   if (g_str_equal (code, "NetConnection.Connect.Success")) {
     node = gst_amf_node_get_field (optional_args, "secureToken");
-    send_secure_token_response (task, data->rtmp_connection,
+    send_secure_token_response (task, data->connection,
         node ? gst_amf_node_peek_string (node) : NULL);
     return;
   }
@@ -780,8 +635,8 @@ send_secure_token_response (GTask * task, GstRtmpConnection * connection,
     gst_amf_node_free (node2);
   }
 
-  g_signal_handler_disconnect (connection, data->rtmp_error_handler_id);
-  data->rtmp_error_handler_id = 0;
+  g_signal_handler_disconnect (connection, data->error_handler_id);
+  data->error_handler_id = 0;
 
   g_task_return_pointer (task, g_object_ref (connection),
       gst_rtmp_connection_close_and_unref);
