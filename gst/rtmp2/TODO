@@ -6,8 +6,6 @@ Some TODO items:
 - rtmp2sink: Should look into reconnecting and resuming stream without
   deleting and recreating stream, which drops clients.
 
-- Hook up meson build
-
 - Server implementation
 
 - Post-connect onStatus handling (needed for src EOS and async errors?)
