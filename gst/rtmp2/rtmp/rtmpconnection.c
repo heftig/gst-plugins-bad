@@ -565,7 +565,7 @@ gst_rtmp_connection_do_read (GstRtmpConnection * sc)
       entry->chunk->payload = g_bytes_new_take
           (g_malloc (header.message_length), header.message_length);
     }
-    memcpy (&entry->previous_header, &header, sizeof (header));
+    memcpy (&entry->previous_header, &header, sizeof header);
     memcpy ((guint8 *) g_bytes_get_data (entry->chunk->payload,
             NULL) + entry->offset, data + header.header_size, chunk_bytes);
     entry->offset += chunk_bytes;

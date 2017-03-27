@@ -98,7 +98,7 @@ node_new (GstAmfType type)
 {
   GstAmfNode *node;
 
-  node = g_slice_alloc0 (sizeof (GstAmfNode));
+  node = g_slice_alloc0 (sizeof *node);
   node->type = type;
 
   switch (type) {
