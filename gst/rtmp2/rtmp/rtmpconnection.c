@@ -25,6 +25,7 @@
 #include <gst/gst.h>
 #include "rtmpconnection.h"
 #include "rtmpchunk.h"
+#include "rtmpmessage.h"
 #include "amf.h"
 #include "rtmputils.h"
 
@@ -622,7 +623,7 @@ gst_rtmp_connection_handle_psm (GstRtmpConnection * connection,
       GST_INFO ("new chunk size %d", moo);
       connection->in_chunk_size = moo;
       break;
-    case GST_RTMP_MESSAGE_TYPE_ABORT:
+    case GST_RTMP_MESSAGE_TYPE_ABORT_MESSAGE:
       moo = GST_READ_UINT32_BE (data);
       GST_ERROR ("unimplemented: chunk abort, stream_id = %d", moo);
       break;

@@ -41,6 +41,7 @@
 
 #include "gstrtmp2locationhandler.h"
 #include "rtmp/rtmpchunk.h"
+#include "rtmp/rtmpmessage.h"
 #include "rtmp/rtmpclient.h"
 #include "rtmp/rtmputils.h"
 
