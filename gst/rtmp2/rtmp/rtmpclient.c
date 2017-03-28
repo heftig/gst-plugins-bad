@@ -569,7 +569,7 @@ rtmp_tea_decode (const gchar * key, const gchar * text)
 
   /* prep text: hex2bin, multiples of 4 */
   n = (strlen (text) + 7) / 8;
-  out = malloc (n * 8);
+  out = g_malloc (n * 8);
   ptr = (guchar *) text;
   v = (guint32 *) out;
   for (i = 0; i < n; i++) {
