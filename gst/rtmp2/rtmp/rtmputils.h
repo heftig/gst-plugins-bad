@@ -21,7 +21,6 @@
 #define _GST_RTMP_UTILS_H_
 
 #include <gio/gio.h>
-#include "rtmpchunk.h"
 
 G_BEGIN_DECLS
 
