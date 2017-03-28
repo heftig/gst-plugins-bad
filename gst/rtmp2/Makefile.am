@@ -41,5 +41,6 @@ noinst_HEADERS = \
 	rtmp/rtmpconnection.h \
 	rtmp/rtmpdebug.h \
 	rtmp/rtmphandshake.h \
+	rtmp/rtmpmessage.h \
 	rtmp/rtmputils.h \
 	$(NULL)
