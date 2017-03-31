@@ -76,6 +76,9 @@ struct _GstRtmp2Sink
   GMainContext *task_main_context;
   GPtrArray *headers;
 
+  /* timestamp fixup */
+  guint64 last_ts, base_ts;
+
   GTask *connect_task;
   GstRtmpConnection *connection;
 };
@@ -375,6 +378,8 @@ gst_rtmp2_sink_start (GstBaseSink * sink)
   GST_DEBUG_OBJECT (rtmp2sink, "start");
 
   rtmp2sink->running = TRUE;
+  rtmp2sink->last_ts = 0;
+  rtmp2sink->base_ts = 0;
   gst_task_start (rtmp2sink->task);
 
   return TRUE;
@@ -447,11 +452,12 @@ gst_rtmp2_sink_unlock_stop (GstBaseSink * sink)
 }
 
 static gboolean
-buffer_to_message (GstBuffer * buffer, GstBuffer ** outbuf)
+buffer_to_message (GstRtmp2Sink * self, GstBuffer * buffer, GstBuffer ** outbuf)
 {
   GstBuffer *message;
   gsize payload_offset, payload_size;
-  guint32 timestamp, cstream;
+  guint64 timestamp;
+  guint32 cstream;
   GstRtmpMessageType type;
 
   {
@@ -485,7 +491,18 @@ buffer_to_message (GstBuffer * buffer, GstBuffer ** outbuf)
 
     type = GST_READ_UINT8 (info.data);
     timestamp = GST_READ_UINT24_BE (info.data + 4);
-    timestamp |= GST_READ_UINT8 (info.data + 7) << 24;
+    timestamp |= (guint32) GST_READ_UINT8 (info.data + 7) << 24;
+
+    /* FIXME: flvmux timestamps roll over after about 49 days */
+    if (timestamp + self->base_ts < self->last_ts) {
+      GST_WARNING ("Timestamp regression %" G_GUINT64_FORMAT " -> %"
+          G_GUINT64_FORMAT "; assuming overflow", self->last_ts,
+          timestamp + self->base_ts);
+      self->base_ts += G_MAXUINT32;
+      self->base_ts += 1;
+    }
+    timestamp += self->base_ts;
+    self->last_ts = timestamp;
 
     gst_buffer_unmap (buffer, &info);
   }
@@ -617,7 +634,7 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
 
   GST_LOG_OBJECT (self, "render %" GST_PTR_FORMAT, buffer);
 
-  if (G_UNLIKELY (!buffer_to_message (buffer, &message))) {
+  if (G_UNLIKELY (!buffer_to_message (self, buffer, &message))) {
     GST_ERROR_OBJECT (self, "Failed to read %" GST_PTR_FORMAT, buffer);
     return GST_FLOW_ERROR;
   }
@@ -655,7 +672,7 @@ gst_rtmp2_sink_set_caps (GstBaseSink * sink, GstCaps * caps)
         g_value_peek_pointer (&g_array_index (streamheader, GValue, i));
     GstBuffer *message;
 
-    if (!buffer_to_message (buffer, &message)) {
+    if (!buffer_to_message (self, buffer, &message)) {
       GST_ERROR_OBJECT (self, "Failed to read streamheader %" GST_PTR_FORMAT,
           buffer);
       return FALSE;
