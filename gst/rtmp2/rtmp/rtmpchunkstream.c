@@ -117,11 +117,11 @@ dts_to_abs_ts (GstBuffer * buffer)
   guint32 ret = 0;
 
   if (GST_CLOCK_TIME_IS_VALID (dts)) {
-    ret = dts / GST_MSECOND;
+    ret = gst_util_uint64_scale_round (dts, 1, GST_MSECOND);
   }
 
   GST_LOG ("Converted DTS %" GST_TIME_FORMAT " into abs TS %"
-      G_GUINT32_FORMAT, GST_TIME_ARGS (dts), ret);
+      G_GUINT32_FORMAT " ms", GST_TIME_ARGS (dts), ret);
   return ret;
 }
 
@@ -131,35 +131,29 @@ dts_diff_to_delta_ts (GstBuffer * old_buffer, GstBuffer * buffer,
 {
   GstClockTime dts = GST_BUFFER_DTS (buffer),
       old_dts = GST_BUFFER_DTS (old_buffer);
-  guint32 delta_32 = 0;
-  gint64 delta_64;
+  guint32 abs_ts, old_abs_ts, delta_32 = 0;
 
   if (!GST_CLOCK_TIME_IS_VALID (dts) || !GST_CLOCK_TIME_IS_VALID (old_dts)) {
     GST_LOG ("Timestamps not valid; using delta TS 0");
     goto out;
   }
 
-  delta_64 = GST_CLOCK_DIFF (old_dts, dts) / GST_MSECOND;
-
-  GST_LOG ("Converted DTS %" GST_TIME_FORMAT " -> %" GST_TIME_FORMAT
-      " into %" G_GINT64_FORMAT " msec", GST_TIME_ARGS (old_dts),
-      GST_TIME_ARGS (dts), delta_64);
-
-  if (ABS (delta_64) >= G_GINT64_CONSTANT (1) << 32) {
-    GST_WARNING ("Timestamp delta too large: %" G_GINT64_FORMAT, delta_64);
+  if (ABS (GST_CLOCK_DIFF (old_dts, dts)) > GST_MSECOND * G_MAXINT32) {
+    GST_WARNING ("Timestamp delta too large: %" GST_TIME_FORMAT " -> %"
+        GST_TIME_FORMAT, GST_TIME_ARGS (old_dts), GST_TIME_ARGS (dts));
     return FALSE;
   }
 
-  if (delta_64 >= 0) {
-    delta_32 = delta_64;
-  } else {
-    /* negative relative timestamp via wraparound */
-    delta_32 = -delta_64;
-    delta_32 = ~delta_32 + 1;
-  }
+  abs_ts = gst_util_uint64_scale_round (dts, 1, GST_MSECOND);
+  old_abs_ts = gst_util_uint64_scale_round (old_dts, 1, GST_MSECOND);
 
-  GST_LOG ("Converted %" G_GINT64_FORMAT " msec into delta TS %"
-      G_GUINT32_FORMAT, delta_64, delta_32);
+  /* underflow wraps around */
+  delta_32 = abs_ts - old_abs_ts;
+
+  GST_LOG ("Converted DTS %" GST_TIME_FORMAT " (%" G_GUINT32_FORMAT " ms) -> %"
+      GST_TIME_FORMAT " (%" G_GUINT32_FORMAT " ms) into delta TS %"
+      G_GUINT32_FORMAT " ms", GST_TIME_ARGS (old_dts), old_abs_ts,
+      GST_TIME_ARGS (dts), abs_ts, delta_32);
 
 out:
   *out_ts = delta_32;
@@ -179,12 +173,12 @@ select_chunk_type (GstRtmpChunkStream * cstream, GstBuffer * buffer)
   g_return_val_if_fail (meta, -1);
   g_return_val_if_fail (gst_rtmp_message_type_is_valid (meta->type), -1);
 
-  meta->ts_delta = dts_to_abs_ts (buffer);
   meta->size = gst_buffer_get_size (buffer);
   meta->cstream = cstream->id;
 
   if (!old_buffer) {
     GST_DEBUG ("Picking header 0: no previous header");
+    meta->ts_delta = dts_to_abs_ts (buffer);
     return CHUNK_TYPE_0;
   }
 
@@ -194,11 +188,13 @@ select_chunk_type (GstRtmpChunkStream * cstream, GstBuffer * buffer)
     GST_DEBUG ("Picking header 0: stream mismatch; "
         "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
         old_meta->mstream, meta->mstream);
+    meta->ts_delta = dts_to_abs_ts (buffer);
     return CHUNK_TYPE_0;
   }
 
   if (!dts_diff_to_delta_ts (old_buffer, buffer, &meta->ts_delta)) {
     GST_DEBUG ("Picking header 0: timestamp delta overflow");
+    meta->ts_delta = dts_to_abs_ts (buffer);
     return CHUNK_TYPE_0;
   }
 
@@ -499,9 +495,11 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
     GST_LOG ("Timestamp delta is %" G_GUINT32_FORMAT " (absolute %"
         G_GUINT32_FORMAT ")", delta_32, abs_32);
 
+    /* emulate signed overflow */
     delta_64 = delta_32;
-    if (delta_64 >= G_GINT64_CONSTANT (1) << 31) {
-      delta_64 -= G_GINT64_CONSTANT (1) << 32;
+    if (delta_64 > G_MAXINT32) {
+      delta_64 -= G_MAXUINT32;
+      delta_64 -= 1;
     }
 
     if (delta_64 < 0) {
