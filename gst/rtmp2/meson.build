@@ -4,10 +4,11 @@ rtmp2_sources = [
   'gstrtmp2sink.c',
   'gstrtmp2src.c',
   'rtmp/amf.c',
-  'rtmp/rtmpchunk.c',
+  'rtmp/rtmpchunkstream.c',
   'rtmp/rtmpclient.c',
   'rtmp/rtmpconnection.c',
   'rtmp/rtmphandshake.c',
+  'rtmp/rtmpmessage.c',
   'rtmp/rtmputils.c',
 ]
 

@@ -26,6 +26,7 @@
 
 GST_DEBUG_CATEGORY (gst_rtmp_debug_category);
 GST_DEBUG_CATEGORY (gst_rtmp_amf_debug_category);
+GST_DEBUG_CATEGORY (gst_rtmp_chunk_stream_debug_category);
 GST_DEBUG_CATEGORY (gst_rtmp_handshake_debug_category);
 
 static gboolean
@@ -35,6 +36,8 @@ plugin_init (GstPlugin * plugin)
       "debug category for rtmp2 plugin");
   GST_DEBUG_CATEGORY_INIT (gst_rtmp_amf_debug_category, "rtmpamf", 0,
       "debug category for the amf parser");
+  GST_DEBUG_CATEGORY_INIT (gst_rtmp_chunk_stream_debug_category,
+      "rtmpchunkstream", 0, "debug category for rtmp chunk streams");
   GST_DEBUG_CATEGORY_INIT (gst_rtmp_handshake_debug_category, "rtmphandshake",
       0, "debug category for the rtmp connection handshake");
   gst_element_register (plugin, "rtmp2src", GST_RANK_PRIMARY + 1,

@@ -25,7 +25,6 @@
 G_BEGIN_DECLS
 
 #define GST_RTMP_DEFAULT_PORT 1935
-#define GST_RTMP_DEFAULT_CHUNK_SIZE 128
 
 void gst_rtmp_dump_bytes (const gchar * string, GBytes * bytes);
 

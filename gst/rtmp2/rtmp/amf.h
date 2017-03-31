@@ -95,8 +95,8 @@ void gst_amf_node_append_field_take_string (GstAmfNode * node,
 void gst_amf_node_dump (const GstAmfNode * node, gboolean multiline,
     GString * string);
 
-GPtrArray * gst_amf_parse_command (GBytes * bytes, gdouble * transaction_id,
-    gchar ** command_name);
+GPtrArray * gst_amf_parse_command (const guint8 * data, gsize size,
+    gdouble * transaction_id, gchar ** command_name);
 
 GBytes * gst_amf_serialize_command (gdouble transaction_id,
     const gchar * command_name, const GstAmfNode * argument, ...) G_GNUC_NULL_TERMINATED;

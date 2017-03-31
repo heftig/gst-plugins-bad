@@ -40,9 +40,8 @@
 #include "gstrtmp2sink.h"
 
 #include "gstrtmp2locationhandler.h"
-#include "rtmp/rtmpchunk.h"
-#include "rtmp/rtmpmessage.h"
 #include "rtmp/rtmpclient.h"
+#include "rtmp/rtmpmessage.h"
 #include "rtmp/rtmputils.h"
 
 #include <gst/gst.h>
@@ -201,7 +200,8 @@ gst_rtmp2_sink_init (GstRtmp2Sink * rtmp2sink)
   rtmp2sink->task = gst_task_new (gst_rtmp2_sink_task, rtmp2sink, NULL);
   g_rec_mutex_init (&rtmp2sink->task_lock);
   gst_task_set_lock (rtmp2sink->task, &rtmp2sink->task_lock);
-  rtmp2sink->headers = g_ptr_array_new_with_free_func (gst_rtmp_chunk_free);
+  rtmp2sink->headers =
+      g_ptr_array_new_with_free_func ((GDestroyNotify) gst_mini_object_unref);
 }
 
 static void
@@ -447,101 +447,90 @@ gst_rtmp2_sink_unlock_stop (GstBaseSink * sink)
 }
 
 static gboolean
-buffer_to_chunk (GstBuffer * buffer, GstRtmpChunk ** chunkp)
+buffer_to_message (GstBuffer * buffer, GstBuffer ** outbuf)
 {
-  GstRtmpChunk *chunk = NULL;
-  gboolean ret = FALSE;
-  GstMapInfo info;
-  guint8 *payload;
-  gsize payload_size;
+  GstBuffer *message;
+  gsize payload_offset, payload_size;
+  guint32 timestamp, cstream;
+  GstRtmpMessageType type;
 
-  *chunkp = NULL;
+  {
+    GstMapInfo info;
 
-  if (G_UNLIKELY (!gst_buffer_map (buffer, &info, GST_MAP_READ))) {
-    GST_ERROR ("map failed: %" GST_PTR_FORMAT, buffer);
-    return FALSE;
-  }
-
-  /* FIXME: This is ugly and only works behind flvmux.
-   *        Implement true RTMP muxing. */
-
-  if (G_UNLIKELY (info.size >= 4 && memcmp (info.data, "FLV", 3) == 0)) {
-    /* drop the header, we don't need it */
-    GST_DEBUG ("ignoring FLV header: %" GST_PTR_FORMAT, buffer);
-    ret = TRUE;
-    goto unmap;
-  }
-
-  if (G_UNLIKELY (info.size < 11 + 4)) {
-    GST_ERROR ("too small: %" GST_PTR_FORMAT, buffer);
-    goto unmap;
-  }
-
-  /* payload between 11 byte header and 4 byte size footer */
-  payload = info.data + 11;
-  payload_size = info.size - 11 - 4;
-
-  chunk = gst_rtmp_chunk_new ();
-  chunk->message_type_id = GST_READ_UINT8 (info.data);
-  chunk->message_length = GST_READ_UINT24_BE (info.data + 1);
-  chunk->timestamp = GST_READ_UINT24_BE (info.data + 4);
-  chunk->timestamp |= GST_READ_UINT8 (info.data + 7) << 24;
-  chunk->stream_id = 1;
-
-  if (G_UNLIKELY (chunk->message_length != payload_size)) {
-    GST_ERROR ("message length mismatch %" G_GSIZE_FORMAT
-        " <> %" GST_PTR_FORMAT, chunk->message_length, buffer);
-    goto unmap;
-  }
-
-  switch (chunk->message_type_id) {
-    case GST_RTMP_MESSAGE_TYPE_DATA:{
-      /* FIXME HACK, attach a setDataFrame header.  This should be done
-       * using a command. */
-
-      static const guint8 header[] = {
-        0x02, 0x00, 0x0d, 0x40, 0x73, 0x65, 0x74, 0x44,
-        0x61, 0x74, 0x61, 0x46, 0x72, 0x61, 0x6d, 0x65
-      };
-      guint8 *newdata;
-
-      chunk->message_length += sizeof header;
-
-      newdata = g_malloc (chunk->message_length);
-      memcpy (newdata, header, sizeof header);
-      memcpy (newdata + sizeof header, payload, payload_size);
-
-      chunk->payload = g_bytes_new_take (newdata, chunk->message_length);
-      chunk->chunk_stream_id = 4;
-      break;
+    if (G_UNLIKELY (!gst_buffer_map (buffer, &info, GST_MAP_READ))) {
+      GST_ERROR ("map failed: %" GST_PTR_FORMAT, buffer);
+      return FALSE;
     }
 
+    /* FIXME: This is ugly and only works behind flvmux.
+     *        Implement true RTMP muxing. */
+
+    if (G_UNLIKELY (info.size >= 4 && memcmp (info.data, "FLV", 3) == 0)) {
+      /* drop the header, we don't need it */
+      GST_DEBUG ("ignoring FLV header: %" GST_PTR_FORMAT, buffer);
+      gst_buffer_unmap (buffer, &info);
+      *outbuf = NULL;
+      return TRUE;
+    }
+
+    if (G_UNLIKELY (info.size < 11 + 4)) {
+      GST_ERROR ("too small: %" GST_PTR_FORMAT, buffer);
+      gst_buffer_unmap (buffer, &info);
+      return FALSE;
+    }
+
+    /* payload between 11 byte header and 4 byte size footer */
+    payload_offset = 11;
+    payload_size = info.size - 11 - 4;
+
+    type = GST_READ_UINT8 (info.data);
+    timestamp = GST_READ_UINT24_BE (info.data + 4);
+    timestamp |= GST_READ_UINT8 (info.data + 7) << 24;
+
+    gst_buffer_unmap (buffer, &info);
+  }
+
+  switch (type) {
+    case GST_RTMP_MESSAGE_TYPE_DATA_AMF0:
+      cstream = 4;
+      break;
+
     case GST_RTMP_MESSAGE_TYPE_AUDIO:
-      chunk->payload = g_bytes_new (payload, payload_size);
-      chunk->chunk_stream_id = 5;
+      cstream = 5;
       break;
 
     case GST_RTMP_MESSAGE_TYPE_VIDEO:
-      chunk->payload = g_bytes_new (payload, payload_size);
-      chunk->chunk_stream_id = 6;
+      cstream = 6;
       break;
 
     default:
-      GST_ERROR ("unknown tag type %d", chunk->message_type_id);
-      goto unmap;
+      GST_ERROR ("unknown tag type %d", type);
+      return FALSE;
   }
 
-  *chunkp = chunk;
-  chunk = NULL;
-  ret = TRUE;
+  message = gst_rtmp_message_new (type, cstream, 1);
+  message = gst_buffer_append_region (message, gst_buffer_ref (buffer),
+      payload_offset, payload_size);
 
-unmap:
-  if (G_UNLIKELY (chunk)) {
-    gst_rtmp_chunk_free (chunk);
+  GST_BUFFER_DTS (message) = timestamp * GST_MSECOND;
+
+  if (type == GST_RTMP_MESSAGE_TYPE_DATA_AMF0) {
+    /* FIXME HACK, attach a setDataFrame header.  This should be done
+     * using a command. */
+
+    static const guint8 header[] = {
+      0x02, 0x00, 0x0d, 0x40, 0x73, 0x65, 0x74, 0x44,
+      0x61, 0x74, 0x61, 0x46, 0x72, 0x61, 0x6d, 0x65
+    };
+
+    GstMemory *memory = gst_memory_new_wrapped (GST_MEMORY_FLAG_READONLY,
+        (guint8 *) header, sizeof header, 0, sizeof header, NULL, NULL);
+
+    gst_buffer_prepend_memory (message, memory);
   }
 
-  gst_buffer_unmap (buffer, &info);
-  return ret;
+  *outbuf = message;
+  return TRUE;
 }
 
 static gboolean
@@ -573,18 +562,19 @@ send_streamheader (GstRtmp2Sink * self)
   GST_DEBUG_OBJECT (self, "Sending %u streamheader chunks", self->headers->len);
 
   for (i = 0; i < self->headers->len; i++) {
-    gst_rtmp_connection_queue_chunk (self->connection,
+    gst_rtmp_connection_queue_message (self->connection,
         g_ptr_array_index (self->headers, i));
   }
 
   /* Steal pointers: suppress free */
   g_ptr_array_set_free_func (self->headers, NULL);
   g_ptr_array_set_size (self->headers, 0);
-  g_ptr_array_set_free_func (self->headers, gst_rtmp_chunk_free);
+  g_ptr_array_set_free_func (self->headers,
+      (GDestroyNotify) gst_mini_object_unref);
 }
 
 static GstFlowReturn
-send_chunk (GstRtmp2Sink * self, GstRtmpChunk * chunk)
+send_message (GstRtmp2Sink * self, GstBuffer * message)
 {
   GstFlowReturn ret;
 
@@ -603,10 +593,10 @@ send_chunk (GstRtmp2Sink * self, GstRtmpChunk * chunk)
 
   if (G_LIKELY (!self->flushing)) {
     send_streamheader (self);
-    gst_rtmp_connection_queue_chunk (self->connection, chunk);
+    gst_rtmp_connection_queue_message (self->connection, message);
     ret = GST_FLOW_OK;
   } else {
-    gst_rtmp_chunk_free (chunk);
+    gst_buffer_unref (message);
     ret = GST_FLOW_FLUSHING;
   }
 
@@ -618,7 +608,7 @@ static GstFlowReturn
 gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
 {
   GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
-  GstRtmpChunk *chunk;
+  GstBuffer *message;
 
   if (G_UNLIKELY (should_drop_header (self, buffer))) {
     GST_DEBUG_OBJECT (self, "Skipping header %" GST_PTR_FORMAT, buffer);
@@ -627,17 +617,17 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
 
   GST_LOG_OBJECT (self, "render %" GST_PTR_FORMAT, buffer);
 
-  if (G_UNLIKELY (!buffer_to_chunk (buffer, &chunk))) {
+  if (G_UNLIKELY (!buffer_to_message (buffer, &message))) {
     GST_ERROR_OBJECT (self, "Failed to read %" GST_PTR_FORMAT, buffer);
     return GST_FLOW_ERROR;
   }
 
-  if (G_UNLIKELY (!chunk)) {
+  if (G_UNLIKELY (!message)) {
     GST_DEBUG_OBJECT (self, "Skipping %" GST_PTR_FORMAT, buffer);
     return GST_FLOW_OK;
   }
 
-  return send_chunk (self, chunk);
+  return send_message (self, message);
 }
 
 static const GArray *
@@ -663,21 +653,21 @@ gst_rtmp2_sink_set_caps (GstBaseSink * sink, GstCaps * caps)
   for (i = 0; i < streamheader->len; i++) {
     GstBuffer *buffer =
         g_value_peek_pointer (&g_array_index (streamheader, GValue, i));
-    GstRtmpChunk *chunk;
+    GstBuffer *message;
 
-    if (!buffer_to_chunk (buffer, &chunk)) {
+    if (!buffer_to_message (buffer, &message)) {
       GST_ERROR_OBJECT (self, "Failed to read streamheader %" GST_PTR_FORMAT,
           buffer);
       return FALSE;
     }
 
-    if (!chunk) {
+    if (!message) {
       GST_DEBUG_OBJECT (self, "Skipping streamheader %" GST_PTR_FORMAT, buffer);
       continue;
     }
 
     GST_DEBUG_OBJECT (self, "Adding streamheader %" GST_PTR_FORMAT, buffer);
-    g_ptr_array_add (self->headers, chunk);
+    g_ptr_array_add (self->headers, message);
   }
 
   GST_DEBUG_OBJECT (self, "Collected streamheaders: %u buffers -> %u chunks",
@@ -865,7 +855,12 @@ create_stream_done (const gchar * command_name, GPtrArray * args,
   GTask *task = G_TASK (user_data);
   GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
 
-  if (args->len < 2) {
+  if (g_task_return_error_if_cancelled (task)) {
+    g_object_unref (task);
+    return;
+  }
+
+  if (!args || args->len < 2) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
         "createStream failed");
     g_object_unref (task);
@@ -913,6 +908,18 @@ publish_done (const gchar * command_name, GPtrArray * args, gpointer user_data)
   GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
   GstAmfType optional_args_type = GST_AMF_TYPE_INVALID;
   GstAmfNode *optional_args;
+
+  if (g_task_return_error_if_cancelled (task)) {
+    g_object_unref (task);
+    return;
+  }
+
+  if (!args || args->len < 1) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "publish failed");
+    g_object_unref (task);
+    return;
+  }
 
   if (args->len > 1) {
     optional_args = g_ptr_array_index (args, 1);

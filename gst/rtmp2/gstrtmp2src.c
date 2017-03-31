@@ -38,9 +38,8 @@
 #include "gstrtmp2src.h"
 
 #include "gstrtmp2locationhandler.h"
-#include "rtmp/rtmpchunk.h"
-#include "rtmp/rtmpmessage.h"
 #include "rtmp/rtmpclient.h"
+#include "rtmp/rtmpmessage.h"
 #include "rtmp/rtmputils.h"
 
 #include <gst/base/gstpushsrc.h>
@@ -68,7 +67,7 @@ struct _GstRtmp2Src
   gboolean sent_header;
   GMutex lock;
   GCond cond;
-  GstRtmpChunk *chunk;
+  GstBuffer *message;
   gboolean running, flushing;
   GstTask *task;
   GRecMutex task_lock;
@@ -98,7 +97,7 @@ static gboolean gst_rtmp2_src_stop (GstBaseSrc * src);
 static gboolean gst_rtmp2_src_unlock (GstBaseSrc * src);
 static gboolean gst_rtmp2_src_unlock_stop (GstBaseSrc * src);
 static GstFlowReturn gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset,
-    guint size, GstBuffer ** buf);
+    guint size, GstBuffer ** outbuf);
 
 /* Internal API */
 static void gst_rtmp2_src_task (gpointer user_data);
@@ -353,7 +352,7 @@ gst_rtmp2_src_finalize (GObject * object)
   g_rec_mutex_clear (&rtmp2src->task_lock);
   g_mutex_clear (&rtmp2src->lock);
   g_cond_clear (&rtmp2src->cond);
-  g_clear_pointer (&rtmp2src->chunk, gst_rtmp_chunk_free);
+  gst_buffer_replace (&rtmp2src->message, NULL);
 
   G_OBJECT_CLASS (gst_rtmp2_src_parent_class)->finalize (object);
 }
@@ -443,15 +442,14 @@ gst_rtmp2_src_unlock_stop (GstBaseSrc * src)
  * implementation will call alloc and fill. */
 static GstFlowReturn
 gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
-    GstBuffer ** buf)
+    GstBuffer ** outbuf)
 {
   GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (src);
-  GstRtmpChunk *chunk;
-  const guint8 *payload_data;
-  gsize payload_size;
-  guint8 *buf_data, *buf_ptr;
+  GstBuffer *message, *buffer;
+  GstRtmpMeta *meta;
+  guint32 timestamp;
 
-  static const guint8 header[] = {
+  static const guint8 flv_header_data[] = {
     0x46, 0x4c, 0x56, 0x01, 0x01, 0x00, 0x00, 0x00,
     0x09, 0x00, 0x00, 0x00, 0x00,
   };
@@ -459,7 +457,7 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
   GST_LOG_OBJECT (rtmp2src, "create");
 
   g_mutex_lock (&rtmp2src->lock);
-  while (!rtmp2src->chunk) {
+  while (!rtmp2src->message) {
     if (!rtmp2src->task_main_loop) {
       g_mutex_unlock (&rtmp2src->lock);
       return GST_FLOW_EOS;
@@ -471,37 +469,57 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
     g_cond_wait (&rtmp2src->cond, &rtmp2src->lock);
   }
 
-  chunk = rtmp2src->chunk;
-  rtmp2src->chunk = NULL;
+  message = rtmp2src->message;
+  rtmp2src->message = NULL;
   g_cond_signal (&rtmp2src->cond);
   g_mutex_unlock (&rtmp2src->lock);
 
-  payload_data = g_bytes_get_data (chunk->payload, &payload_size);
-  buf_data = buf_ptr = g_malloc (payload_size + 11 + 4 +
-      (rtmp2src->sent_header ? 0 : sizeof header));
-
-  if (!rtmp2src->sent_header) {
-    rtmp2src->sent_header = TRUE;
-    memcpy (buf_ptr, header, sizeof header);
-    buf_ptr += sizeof header;
+  if (GST_BUFFER_DTS_IS_VALID (message)) {
+    timestamp = GST_BUFFER_DTS (message) / GST_MSECOND;
+  } else {
+    timestamp = 0;
   }
 
-  GST_WRITE_UINT8 (buf_ptr, chunk->message_type_id);
-  GST_WRITE_UINT24_BE (buf_ptr + 1, chunk->message_length);
-  GST_WRITE_UINT24_BE (buf_ptr + 4, chunk->timestamp);
-  GST_WRITE_UINT8 (buf_ptr + 7, chunk->timestamp >> 24);
-  GST_WRITE_UINT24_BE (buf_ptr + 8, 0);
-  buf_ptr += 11;
+  meta = gst_buffer_get_rtmp_meta (message);
+  if (!meta) {
+    GST_ERROR ("%" GST_PTR_FORMAT " has no RTMP meta", message);
+    gst_buffer_unref (message);
+    return GST_FLOW_ERROR;
+  }
 
-  memcpy (buf_ptr, payload_data, payload_size);
-  buf_ptr += payload_size;
+  buffer = gst_buffer_copy_region (message, GST_BUFFER_COPY_MEMORY, 0, -1);
 
-  GST_WRITE_UINT32_BE (buf_ptr, payload_size + 11);
-  buf_ptr += 4;
-  gst_rtmp_chunk_free (chunk);
+  {
+    guint8 *tag_header = g_malloc (11);
+    GstMemory *memory =
+        gst_memory_new_wrapped (0, tag_header, 11, 0, 11, tag_header, g_free);
+    GST_WRITE_UINT8 (tag_header, meta->type);
+    GST_WRITE_UINT24_BE (tag_header + 1, meta->size);
+    GST_WRITE_UINT24_BE (tag_header + 4, timestamp);
+    GST_WRITE_UINT8 (tag_header + 7, timestamp >> 24);
+    GST_WRITE_UINT24_BE (tag_header + 8, 0);
+    gst_buffer_prepend_memory (buffer, memory);
+  }
 
-  *buf = gst_buffer_new_wrapped (buf_data, buf_ptr - buf_data);
+  {
+    guint8 *tag_footer = g_malloc (4);
+    GstMemory *memory =
+        gst_memory_new_wrapped (0, tag_footer, 4, 0, 4, tag_footer, g_free);
+    GST_WRITE_UINT32_BE (tag_footer, meta->size + 11);
+    gst_buffer_append_memory (buffer, memory);
+  }
 
+  if (!rtmp2src->sent_header) {
+    GstMemory *memory = gst_memory_new_wrapped (GST_MEMORY_FLAG_READONLY,
+        (guint8 *) flv_header_data, sizeof flv_header_data, 0,
+        sizeof flv_header_data, NULL, NULL);
+    gst_buffer_prepend_memory (buffer, memory);
+    rtmp2src->sent_header = TRUE;
+  }
+
+  *outbuf = buffer;
+
+  gst_buffer_unref (message);
   return GST_FLOW_OK;
 }
 
@@ -539,7 +557,7 @@ gst_rtmp2_src_task (gpointer user_data)
 
   g_mutex_lock (&rtmp2src->lock);
   g_clear_pointer (&rtmp2src->task_main_context, g_main_context_unref);
-  g_clear_pointer (&rtmp2src->chunk, gst_rtmp_chunk_free);
+  gst_buffer_replace (&rtmp2src->message, NULL);
   g_mutex_unlock (&rtmp2src->lock);
 
   GST_DEBUG ("gst_rtmp2_src_task exiting");
@@ -563,25 +581,26 @@ new_connect (GstRtmp2Src * rtmp2src)
 }
 
 static void
-got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
+got_message (GstRtmpConnection * connection, GstBuffer * buffer,
     gpointer user_data)
 {
   GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (user_data);
+  GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (buffer);
 
-  g_return_if_fail (chunk);
+  g_return_if_fail (meta);
 
-  if (chunk->stream_id == 0) {
+  if (meta->mstream == 0) {
     goto uninteresting;
   }
 
-  if (chunk->message_length == 0) {
+  if (meta->size == 0) {
     goto uninteresting;
   }
 
-  switch (chunk->message_type_id) {
+  switch (meta->type) {
     case GST_RTMP_MESSAGE_TYPE_VIDEO:
     case GST_RTMP_MESSAGE_TYPE_AUDIO:
-    case GST_RTMP_MESSAGE_TYPE_DATA:
+    case GST_RTMP_MESSAGE_TYPE_DATA_AMF0:
       break;
 
     default:
@@ -589,25 +608,25 @@ got_chunk (GstRtmpConnection * connection, GstRtmpChunk * chunk,
   }
 
   g_mutex_lock (&rtmp2src->lock);
-  while (rtmp2src->chunk) {
+  while (rtmp2src->message) {
     if (!rtmp2src->running) {
-      g_mutex_unlock (&rtmp2src->lock);
-      gst_rtmp_chunk_free (chunk);
-      return;
+      goto out;
     }
     g_cond_wait (&rtmp2src->cond, &rtmp2src->lock);
   }
 
-  rtmp2src->chunk = chunk;
+  rtmp2src->message = gst_buffer_ref (buffer);
   g_cond_signal (&rtmp2src->cond);
+
+out:
   g_mutex_unlock (&rtmp2src->lock);
   return;
 
 uninteresting:
   GST_DEBUG_OBJECT (rtmp2src,
-      "not interested in chunk type %d stream %d size %" G_GSIZE_FORMAT,
-      chunk->message_type_id, chunk->stream_id, chunk->message_length);
-  gst_rtmp_chunk_free (chunk);
+      "not interested in chunk with stream %" G_GUINT32_FORMAT " size %"
+      G_GUINT32_FORMAT " type %s", meta->mstream, meta->size,
+      gst_rtmp_message_type_get_nick (meta->type));
 }
 
 static void
@@ -640,7 +659,7 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
   rtmp2src->connection = g_task_propagate_pointer (task, &error);
   if (rtmp2src->connection) {
     gst_rtmp_connection_set_input_handler (rtmp2src->connection,
-        got_chunk, g_object_ref (rtmp2src), g_object_unref);
+        got_message, g_object_ref (rtmp2src), g_object_unref);
     g_signal_connect_object (rtmp2src->connection, "error",
         G_CALLBACK (connection_error), rtmp2src, 0);
   } else {
@@ -708,7 +727,12 @@ create_stream_done (const gchar * command_name, GPtrArray * args,
   GTask *task = G_TASK (user_data);
   GstRtmp2Src *rtmp2src = g_task_get_source_object (task);
 
-  if (args->len < 2) {
+  if (g_task_return_error_if_cancelled (task)) {
+    g_object_unref (task);
+    return;
+  }
+
+  if (!args || args->len < 2) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
         "createStream failed");
     g_object_unref (task);
@@ -761,6 +785,18 @@ play_done (const gchar * command_name, GPtrArray * args, gpointer user_data)
   GstRtmp2Src *rtmp2src = g_task_get_source_object (task);
   GstAmfType optional_args_type = GST_AMF_TYPE_INVALID;
   GstAmfNode *optional_args;
+
+  if (g_task_return_error_if_cancelled (task)) {
+    g_object_unref (task);
+    return;
+  }
+
+  if (!args || args->len < 1) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "play failed");
+    g_object_unref (task);
+    return;
+  }
 
   if (args->len > 1) {
     optional_args = g_ptr_array_index (args, 1);
