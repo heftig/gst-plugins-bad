@@ -6,10 +6,11 @@ libgstrtmp2_la_SOURCES = \
 	gstrtmp2sink.c \
 	gstrtmp2src.c \
 	rtmp/amf.c \
-	rtmp/rtmpchunk.c \
+	rtmp/rtmpchunkstream.c \
 	rtmp/rtmpclient.c \
 	rtmp/rtmpconnection.c \
 	rtmp/rtmphandshake.c \
+	rtmp/rtmpmessage.c \
 	rtmp/rtmputils.c \
 	$(NULL)
 
@@ -36,7 +37,7 @@ noinst_HEADERS = \
 	gstrtmp2sink.h \
 	gstrtmp2src.h \
 	rtmp/amf.h \
-	rtmp/rtmpchunk.h \
+	rtmp/rtmpchunkstream.h \
 	rtmp/rtmpclient.h \
 	rtmp/rtmpconnection.h \
 	rtmp/rtmpdebug.h \
