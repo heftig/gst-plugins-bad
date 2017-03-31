@@ -48,12 +48,6 @@ typedef enum
   GST_AMF_TYPE_AVMPLUS_OBJECT = 17
 } GstAmfType;
 
-static inline gboolean
-gst_amf_type_is_valid (GstAmfType type)
-{
-  return type >= 0 && type <= GST_AMF_TYPE_AVMPLUS_OBJECT;
-}
-
 const gchar * gst_amf_type_get_nick (GstAmfType type);
 
 typedef struct _GstAmfNode GstAmfNode;
