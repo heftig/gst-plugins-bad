@@ -32,22 +32,50 @@
 GST_DEBUG_CATEGORY_EXTERN (gst_rtmp_amf_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_amf_debug_category
 
-static const gchar *type_nicks[] = {
-  "number", "boolean", "string", "object", "movie-clip", "null", "undefined",
-  "reference", "ecma-array", "object-end", "strict-array", "date",
-  "long-string", "unsupported", "recordset", "xml-document", "typed-object",
-  "avmplus-object"
-};
-
 const gchar *
 gst_amf_type_get_nick (GstAmfType type)
 {
-  if (type == -1) {
-    return "invalid";
-  } else if (gst_amf_type_is_valid (type)) {
-    return type_nicks[type];
-  } else {
-    return "unknown";
+  switch (type) {
+    case GST_AMF_TYPE_INVALID:
+      return "invalid";
+    case GST_AMF_TYPE_NUMBER:
+      return "number";
+    case GST_AMF_TYPE_BOOLEAN:
+      return "boolean";
+    case GST_AMF_TYPE_STRING:
+      return "string";
+    case GST_AMF_TYPE_OBJECT:
+      return "object";
+    case GST_AMF_TYPE_MOVIECLIP:
+      return "movieclip";
+    case GST_AMF_TYPE_NULL:
+      return "null";
+    case GST_AMF_TYPE_UNDEFINED:
+      return "undefined";
+    case GST_AMF_TYPE_REFERENCE:
+      return "reference";
+    case GST_AMF_TYPE_ECMA_ARRAY:
+      return "ecma-array";
+    case GST_AMF_TYPE_OBJECT_END:
+      return "object-end";
+    case GST_AMF_TYPE_STRICT_ARRAY:
+      return "strict-array";
+    case GST_AMF_TYPE_DATE:
+      return "date";
+    case GST_AMF_TYPE_LONG_STRING:
+      return "long-string";
+    case GST_AMF_TYPE_UNSUPPORTED:
+      return "unsupported";
+    case GST_AMF_TYPE_RECORDSET:
+      return "recordset";
+    case GST_AMF_TYPE_XML_DOCUMENT:
+      return "xml-document";
+    case GST_AMF_TYPE_TYPED_OBJECT:
+      return "typed-object";
+    case GST_AMF_TYPE_AVMPLUS_OBJECT:
+      return "avmplus-object";
+    default:
+      return "unknown";
   }
 }
 
