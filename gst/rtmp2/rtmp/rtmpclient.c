@@ -387,9 +387,14 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
   const GstAmfNode *node, *optional_args;
   const gchar *code;
 
-  if (args->len < 2) {
+  if (g_task_return_error_if_cancelled (task)) {
+    g_object_unref (task);
+    return;
+  }
+
+  if (!args || args->len < 2) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "arguments missing from connect cmd result");
+        "connect failed");
     g_object_unref (task);
     return;
   }

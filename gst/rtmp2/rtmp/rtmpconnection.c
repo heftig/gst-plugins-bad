@@ -23,13 +23,12 @@
 #endif
 
 #include <gst/gst.h>
-#include "rtmpconnection.h"
-#include "rtmpchunk.h"
-#include "rtmpmessage.h"
-#include "amf.h"
-#include "rtmputils.h"
-
 #include <string.h>
+#include "rtmpconnection.h"
+#include "rtmpchunkstream.h"
+#include "rtmpmessage.h"
+#include "rtmputils.h"
+#include "amf.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_connection_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_connection_debug_category
@@ -37,17 +36,6 @@ GST_DEBUG_CATEGORY_STATIC (gst_rtmp_connection_debug_category);
 #define READ_SIZE 8192
 
 typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection * connection);
-
-typedef enum
-{
-  GST_RTMP_USER_CONTROL_STREAM_BEGIN = 0,
-  GST_RTMP_USER_CONTROL_STREAM_EOF = 1,
-  GST_RTMP_USER_CONTROL_STREAM_DRY = 2,
-  GST_RTMP_USER_CONTROL_SET_BUFFER_LENGTH = 3,
-  GST_RTMP_USER_CONTROL_STREAM_IS_RECORDED = 4,
-  GST_RTMP_USER_CONTROL_PING_REQUEST = 6,
-  GST_RTMP_USER_CONTROL_PING_RESPONSE = 7,
-} GstRtmpUserControl;
 
 struct _GstRtmpConnection
 {
@@ -68,11 +56,11 @@ struct _GstRtmpConnection
   GSource *input_source;
   GByteArray *input_bytes;
   guint input_needed_bytes;
-  GstRtmpChunkCache *input_chunk_cache, *output_chunk_cache;
+  GstRtmpChunkStreams *input_streams, *output_streams;
   GList *command_callbacks;
   guint transaction_count;
 
-  GstRtmpConnectionChunkFunc input_handler;
+  GstRtmpConnectionMessageFunc input_handler;
   gpointer input_handler_user_data;
   GDestroyNotify input_handler_user_data_destroy;
 
@@ -100,7 +88,7 @@ struct _GstRtmpConnectionClass
 
 static void gst_rtmp_connection_dispose (GObject * object);
 static void gst_rtmp_connection_finalize (GObject * object);
-static void gst_rtmp_connection_emit_error (GstRtmpConnection * connection);
+static void gst_rtmp_connection_emit_error (GstRtmpConnection * self);
 static gboolean gst_rtmp_connection_input_ready (GInputStream * is,
     gpointer user_data);
 static void gst_rtmp_connection_start_write (GstRtmpConnection * self);
@@ -110,14 +98,14 @@ static void gst_rtmp_connection_start_read (GstRtmpConnection * sc,
     guint needed_bytes);
 static void gst_rtmp_connection_try_read (GstRtmpConnection * sc);
 static void gst_rtmp_connection_do_read (GstRtmpConnection * sc);
-static void gst_rtmp_connection_handle_psm (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk);
+static void gst_rtmp_connection_handle_protocol_control (GstRtmpConnection *
+    connection, GstBuffer * buffer);
 static void gst_rtmp_connection_handle_cm (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk);
+    GstBuffer * buffer);
 static void gst_rtmp_connection_handle_user_control (GstRtmpConnection * sc,
-    guint32 event_type, guint32 event_data);
-static void gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc,
-    GstRtmpChunk * chunk);
+    GstBuffer * buffer);
+static void gst_rtmp_connection_handle_message (GstRtmpConnection * sc,
+    GstBuffer * buffer);
 
 static void gst_rtmp_connection_send_ack (GstRtmpConnection * connection);
 static void
@@ -193,8 +181,8 @@ gst_rtmp_connection_init (GstRtmpConnection * rtmpconnection)
   rtmpconnection->cancellable = g_cancellable_new ();
   rtmpconnection->output_queue =
       g_async_queue_new_full ((GDestroyNotify) g_bytes_unref);
-  rtmpconnection->input_chunk_cache = gst_rtmp_chunk_cache_new ();
-  rtmpconnection->output_chunk_cache = gst_rtmp_chunk_cache_new ();
+  rtmpconnection->input_streams = gst_rtmp_chunk_streams_new ();
+  rtmpconnection->output_streams = gst_rtmp_chunk_streams_new ();
 
   rtmpconnection->in_chunk_size = GST_RTMP_DEFAULT_CHUNK_SIZE;
   rtmpconnection->out_chunk_size = GST_RTMP_DEFAULT_CHUNK_SIZE;
@@ -230,10 +218,9 @@ gst_rtmp_connection_finalize (GObject * object)
   g_clear_object (&rtmpconnection->cancellable);
   g_clear_object (&rtmpconnection->connection);
   g_clear_pointer (&rtmpconnection->output_queue, g_async_queue_unref);
-  g_clear_pointer (&rtmpconnection->input_chunk_cache,
-      gst_rtmp_chunk_cache_free);
-  g_clear_pointer (&rtmpconnection->output_chunk_cache,
-      gst_rtmp_chunk_cache_free);
+  g_clear_pointer (&rtmpconnection->input_streams, gst_rtmp_chunk_streams_free);
+  g_clear_pointer (&rtmpconnection->output_streams,
+      gst_rtmp_chunk_streams_free);
   g_clear_pointer (&rtmpconnection->input_bytes, g_byte_array_unref);
   g_clear_pointer (&rtmpconnection->main_context, g_main_context_unref);
   g_clear_pointer (&rtmpconnection->thread, g_thread_unref);
@@ -276,6 +263,21 @@ gst_rtmp_connection_new (GSocketConnection * connection)
   return sc;
 }
 
+static void
+cancel_all_commands (GstRtmpConnection * self)
+{
+  GList *l;
+  for (l = self->command_callbacks; l; l = g_list_next (l)) {
+    CommandCallback *cc = l->data;
+    GST_TRACE ("calling command callback %s",
+        GST_DEBUG_FUNCPTR_NAME (cc->func));
+    cc->func ("<cancelled>", NULL, cc->user_data);
+  }
+
+  g_list_free_full (self->command_callbacks, command_callback_free);
+  self->command_callbacks = NULL;
+}
+
 void
 gst_rtmp_connection_close (GstRtmpConnection * self)
 {
@@ -284,9 +286,7 @@ gst_rtmp_connection_close (GstRtmpConnection * self)
   }
 
   g_cancellable_cancel (self->cancellable);
-
-  g_list_free_full (self->command_callbacks, command_callback_free);
-  self->command_callbacks = NULL;
+  cancel_all_commands (self);
 
   if (self->input_source) {
     g_source_destroy (self->input_source);
@@ -313,7 +313,7 @@ gst_rtmp_connection_close_and_unref (gpointer ptr)
 
 void
 gst_rtmp_connection_set_input_handler (GstRtmpConnection * sc,
-    GstRtmpConnectionChunkFunc callback, gpointer user_data,
+    GstRtmpConnectionMessageFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy)
 {
   if (sc->input_handler_user_data_destroy) {
@@ -392,18 +392,6 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
 }
 
 static void
-dump_chunk (GstRtmpChunk * chunk, gboolean outgoing)
-{
-  GST_LOG ("%s cstream:%-4d ts:%-8d len:%-6" G_GSIZE_FORMAT
-      " type:%-4d mstream:%-4d", outgoing ? ">>>" : "<<<",
-      chunk->chunk_stream_id, chunk->timestamp, chunk->message_length,
-      chunk->message_type_id, chunk->stream_id);
-
-  gst_rtmp_dump_bytes (outgoing ? ">>> payload" : "<<< payload",
-      chunk->payload);
-}
-
-static void
 gst_rtmp_connection_start_write (GstRtmpConnection * self)
 {
   GOutputStream *os;
@@ -431,15 +419,18 @@ gst_rtmp_connection_start_write (GstRtmpConnection * self)
 }
 
 static void
-gst_rtmp_connection_emit_error (GstRtmpConnection * connection)
+gst_rtmp_connection_emit_error (GstRtmpConnection * self)
 {
-  if (connection->error) {
+  if (self->error) {
     return;
   }
 
   GST_INFO ("connection error");
-  connection->error = TRUE;
-  g_signal_emit (connection, signals[SIGNAL_ERROR], 0);
+  self->error = TRUE;
+
+  cancel_all_commands (self);
+
+  g_signal_emit (self, signals[SIGNAL_ERROR], 0);
 }
 
 static void
@@ -511,75 +502,49 @@ gst_rtmp_connection_take_input_bytes (GstRtmpConnection * sc, gsize size,
 static void
 gst_rtmp_connection_do_read (GstRtmpConnection * sc)
 {
+  GByteArray *input_bytes = sc->input_bytes;
   gsize needed_bytes = 1;
-  gsize size = 0;
 
   while (1) {
-    GstRtmpChunkHeader header = { 0 };
-    GstRtmpChunkCacheEntry *entry;
-    gboolean ret, continuation;
-    gsize remaining_bytes;
-    gsize chunk_bytes;
-    const guint8 *data;
-    guint32 chunk_stream_id;
+    GstRtmpChunkStream *cstream;
+    guint32 chunk_stream_id, header_size, next_size;
+    guint8 *data;
 
-    chunk_stream_id = gst_rtmp_chunk_parse_stream_id (sc->input_bytes->data,
-        sc->input_bytes->len);
+    chunk_stream_id = gst_rtmp_chunk_stream_parse_id (input_bytes->data,
+        input_bytes->len);
 
     if (!chunk_stream_id) {
-      needed_bytes = sc->input_bytes->len + 1;
+      needed_bytes = input_bytes->len + 1;
       break;
     }
 
-    entry = gst_rtmp_chunk_cache_get (sc->input_chunk_cache, chunk_stream_id);
-    continuation = ! !entry->chunk;
+    cstream = gst_rtmp_chunk_streams_get (sc->input_streams, chunk_stream_id);
+    header_size = gst_rtmp_chunk_stream_parse_header (cstream,
+        input_bytes->data, input_bytes->len);
 
-    ret = gst_rtmp_chunk_parse_header (&header, sc->input_bytes->data,
-        sc->input_bytes->len, &entry->previous_header, continuation);
-
-    if (!ret) {
-      needed_bytes = header.header_size;
+    if (input_bytes->len < header_size) {
+      needed_bytes = header_size;
       break;
     }
 
-    if (continuation && header.format != 3) {
-      g_clear_pointer (&entry->chunk, gst_rtmp_chunk_free);
-    }
+    next_size = gst_rtmp_chunk_stream_parse_payload (cstream,
+        sc->in_chunk_size, &data);
 
-    remaining_bytes = header.message_length - entry->offset;
-    chunk_bytes = MIN (remaining_bytes, sc->in_chunk_size);
-    data = sc->input_bytes->data;
-    size = sc->input_bytes->len;
-
-    if (header.header_size + chunk_bytes > size) {
-      needed_bytes = header.header_size + chunk_bytes;
+    if (input_bytes->len < header_size + next_size) {
+      needed_bytes = header_size + next_size;
       break;
     }
 
-    if (entry->chunk == NULL) {
-      entry->chunk = gst_rtmp_chunk_new ();
-      entry->chunk->chunk_stream_id = header.chunk_stream_id;
-      entry->chunk->timestamp = header.timestamp_abs;
-      entry->chunk->message_length = header.message_length;
-      entry->chunk->message_type_id = header.message_type_id;
-      entry->chunk->stream_id = header.stream_id;
-      entry->chunk->payload = g_bytes_new_take
-          (g_malloc (header.message_length), header.message_length);
-    }
-    memcpy (&entry->previous_header, &header, sizeof header);
-    memcpy ((guint8 *) g_bytes_get_data (entry->chunk->payload,
-            NULL) + entry->offset, data + header.header_size, chunk_bytes);
-    entry->offset += chunk_bytes;
+    memcpy (data, input_bytes->data + header_size, next_size);
+    gst_rtmp_connection_take_input_bytes (sc, header_size + next_size, NULL);
 
-    gst_rtmp_connection_take_input_bytes (sc,
-        header.header_size + chunk_bytes, NULL);
+    next_size = gst_rtmp_chunk_stream_wrote_payload (cstream,
+        sc->in_chunk_size);
 
-    if (entry->offset == header.message_length) {
-      GstRtmpChunk *chunk = entry->chunk;
-      entry->chunk = NULL;
-      entry->offset = 0;
-
-      gst_rtmp_connection_handle_chunk (sc, chunk);
+    if (next_size == 0) {
+      GstBuffer *buffer = gst_rtmp_chunk_stream_parse_finish (cstream);
+      gst_rtmp_connection_handle_message (sc, buffer);
+      gst_buffer_unref (buffer);
     }
   }
 
@@ -587,88 +552,229 @@ gst_rtmp_connection_do_read (GstRtmpConnection * sc)
 }
 
 static void
-gst_rtmp_connection_handle_chunk (GstRtmpConnection * sc, GstRtmpChunk * chunk)
+gst_rtmp_connection_handle_message (GstRtmpConnection * sc, GstBuffer * buffer)
 {
-  dump_chunk (chunk, FALSE);
+  if (gst_rtmp_message_is_protocol_control (buffer)) {
+    gst_rtmp_connection_handle_protocol_control (sc, buffer);
+    return;
+  }
 
-  if (chunk->chunk_stream_id == GST_RTMP_CHUNK_STREAM_PROTOCOL) {
-    gst_rtmp_connection_handle_psm (sc, chunk);
-    gst_rtmp_chunk_free (chunk);
-  } else if (chunk->message_type_id == GST_RTMP_MESSAGE_TYPE_COMMAND) {
-    gst_rtmp_connection_handle_cm (sc, chunk);
-    gst_rtmp_chunk_free (chunk);
-  } else {
-    GST_LOG ("got chunk: %" G_GSIZE_FORMAT " bytes", chunk->message_length);
-    if (sc->input_handler) {
-      sc->input_handler (sc, chunk, sc->input_handler_user_data);
-    } else {
-      gst_rtmp_chunk_free (chunk);
-    }
+  if (gst_rtmp_message_is_user_control (buffer)) {
+    gst_rtmp_connection_handle_user_control (sc, buffer);
+    return;
+  }
+
+  switch (gst_rtmp_message_get_type (buffer)) {
+    case GST_RTMP_MESSAGE_TYPE_COMMAND_AMF0:
+      gst_rtmp_connection_handle_cm (sc, buffer);
+      return;
+
+    default:
+      if (sc->input_handler) {
+        sc->input_handler (sc, buffer, sc->input_handler_user_data);
+      }
+      return;
   }
 }
 
 static void
-gst_rtmp_connection_handle_psm (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk)
+gst_rtmp_connection_handle_protocol_control (GstRtmpConnection * connection,
+    GstBuffer * buffer)
 {
-  const guint8 *data;
-  gsize size;
-  guint32 moo;
-  guint32 moo2;
-  data = g_bytes_get_data (chunk->payload, &size);
-  GST_DEBUG ("got stream protocol message %d", chunk->message_type_id);
-  switch (chunk->message_type_id) {
+  GstRtmpMessageType type = gst_rtmp_message_get_type (buffer);
+  GstMapInfo map;
+  guint32 param, param2;
+
+  if (!gst_buffer_map (buffer, &map, GST_MAP_READ)) {
+    GST_ERROR ("can't map protocol control message");
+    return;
+  }
+
+  GST_LOG ("got protocol control message %d:%s", type,
+      gst_rtmp_message_type_get_nick (type));
+
+  switch (type) {
     case GST_RTMP_MESSAGE_TYPE_SET_CHUNK_SIZE:
-      moo = GST_READ_UINT32_BE (data);
-      GST_INFO ("new chunk size %d", moo);
-      connection->in_chunk_size = moo;
+      if (map.size < 4) {
+        GST_ERROR ("can't read chunk size");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_INFO ("new chunk size %" G_GUINT32_FORMAT, param);
+      connection->in_chunk_size = param;
       break;
+
     case GST_RTMP_MESSAGE_TYPE_ABORT_MESSAGE:
-      moo = GST_READ_UINT32_BE (data);
-      GST_ERROR ("unimplemented: chunk abort, stream_id = %d", moo);
+      if (map.size < 4) {
+        GST_ERROR ("can't read stream id");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_ERROR ("unimplemented: chunk abort, stream_id = %" G_GUINT32_FORMAT,
+          param);
       break;
+
     case GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT:
-      moo = GST_READ_UINT32_BE (data);
+      if (map.size < 4) {
+        GST_ERROR ("can't read acked bytes");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
       /* We don't really send ack requests that we care about, so ignore */
-      GST_DEBUG ("acknowledgement %d", moo);
+      GST_DEBUG ("acknowledgement %" G_GUINT32_FORMAT, param);
       break;
-    case GST_RTMP_MESSAGE_TYPE_USER_CONTROL:
-      moo = GST_READ_UINT16_BE (data);
-      moo2 = GST_READ_UINT32_BE (data + 2);
-      GST_INFO ("user control: %d, %d", moo, moo2);
-      gst_rtmp_connection_handle_user_control (connection, moo, moo2);
-      break;
+
     case GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE:
-      moo = GST_READ_UINT32_BE (data);
-      GST_INFO ("window ack size: %d", moo);
-      connection->window_ack_size = GST_READ_UINT32_BE (data);
+      if (map.size < 4) {
+        GST_ERROR ("can't read window ack size");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_INFO ("window ack size: %" G_GUINT32_FORMAT, param);
+      connection->window_ack_size = param;
       break;
+
     case GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH:
-      moo = GST_READ_UINT32_BE (data);
-      moo2 = data[4];
-      GST_DEBUG ("set peer bandwidth: %d, %d", moo, moo2);
+      if (map.size < 5) {
+        GST_ERROR ("can't read peer bandwidth");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      param2 = GST_READ_UINT8 (map.data + 4);
+      GST_FIXME ("set peer bandwidth: %" G_GUINT32_FORMAT ", %"
+          G_GUINT32_FORMAT, param, param2);
       /* FIXME this is not correct, but close enough */
-      if (connection->peer_bandwidth != moo) {
-        connection->peer_bandwidth = moo;
+      if (connection->peer_bandwidth != param) {
+        connection->peer_bandwidth = param;
         gst_rtmp_connection_send_window_size_request (connection);
       }
       break;
+
     default:
-      GST_ERROR ("unimplemented protocol stream message type %d",
-          chunk->message_type_id);
+      GST_ERROR ("unimplemented protocol control type %d:%s", type,
+          gst_rtmp_message_type_get_nick (type));
       break;
   }
+
+  gst_buffer_unmap (buffer, &map);
 }
 
 static void
-gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstRtmpChunk * chunk)
+gst_rtmp_connection_handle_user_control (GstRtmpConnection * connection,
+    GstBuffer * buffer)
 {
+  GstRtmpUserControlType type;
+  GstMapInfo map;
+  guint32 param, param2;
+
+  if (!gst_buffer_map (buffer, &map, GST_MAP_READ)) {
+    GST_ERROR ("can't map user control message");
+    return;
+  }
+
+  if (map.size < 2) {
+    GST_ERROR ("can't read user control type");
+    gst_buffer_unmap (buffer, &map);
+    return;
+  }
+
+  type = GST_READ_UINT16_BE (map.data);
+  GST_LOG ("got user control message %d:%s", type,
+      gst_rtmp_user_control_type_get_nick (type));
+
+  switch (type) {
+    case GST_RTMP_USER_CONTROL_TYPE_STREAM_BEGIN:
+      if (map.size < 4) {
+        GST_ERROR ("can't read stream id");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_DEBUG ("ignoring stream begin: %" G_GUINT32_FORMAT, param);
+      break;
+
+    case GST_RTMP_USER_CONTROL_TYPE_STREAM_EOF:
+      if (map.size < 4) {
+        GST_ERROR ("can't read stream id");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_ERROR ("unimplemented stream EOF: %" G_GUINT32_FORMAT, param);
+      break;
+
+    case GST_RTMP_USER_CONTROL_TYPE_STREAM_DRY:
+      if (map.size < 4) {
+        GST_ERROR ("can't read stream id");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_DEBUG ("ignoring stream dry: %" G_GUINT32_FORMAT, param);
+      break;
+
+    case GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH:
+      if (map.size < 8) {
+        GST_ERROR ("can't read buffer length");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      param2 = GST_READ_UINT32_BE (map.data + 4);
+      GST_FIXME ("ignoring set buffer length: %" G_GUINT32_FORMAT ", %"
+          G_GUINT32_FORMAT " ms", param, param2);
+      break;
+
+    case GST_RTMP_USER_CONTROL_TYPE_STREAM_IS_RECORDED:
+      if (map.size < 4) {
+        GST_ERROR ("can't read stream id");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_ERROR ("unimplemented stream-is-recorded: %" G_GUINT32_FORMAT, param);
+      break;
+
+    case GST_RTMP_USER_CONTROL_TYPE_PING_REQUEST:
+      if (map.size < 4) {
+        GST_ERROR ("can't read ping data");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_DEBUG ("ping request: %" G_GUINT32_FORMAT, param);
+      gst_rtmp_connection_send_ping_response (connection, param);
+      break;
+
+    case GST_RTMP_USER_CONTROL_TYPE_PING_RESPONSE:
+      if (map.size < 4) {
+        GST_ERROR ("can't read ping data");
+        break;
+      }
+      param = GST_READ_UINT32_BE (map.data);
+      GST_DEBUG ("ignoring ping response: %" G_GUINT32_FORMAT, param);
+      break;
+
+    default:
+      GST_ERROR ("unimplemented user control type %d:%s", type,
+          gst_rtmp_user_control_type_get_nick (type));
+      break;
+  }
+
+  gst_buffer_unmap (buffer, &map);
+}
+
+static void
+gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
+{
+  GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (buffer);
   gchar *command_name;
   gdouble transaction_id;
   GPtrArray *args;
   GList *l;
+  GstMapInfo map;
 
-  args = gst_amf_parse_command (chunk->payload, &transaction_id, &command_name);
+  gst_buffer_map (buffer, &map, GST_MAP_READ);
+
+  args = gst_amf_parse_command (map.data, map.size, &transaction_id,
+      &command_name);
+
+  gst_buffer_unmap (buffer, &map);
+
   if (!args) {
     return;
   }
@@ -682,13 +788,13 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstRtmpChunk * chunk)
   }
 
   GST_DEBUG ("got control message \"%s\" transaction %.0f size %"
-      G_GSIZE_FORMAT, GST_STR_NULL (command_name), transaction_id,
-      chunk->message_length);
+      G_GUINT32_FORMAT, GST_STR_NULL (command_name), transaction_id,
+      meta->size);
 
   for (l = sc->command_callbacks; l; l = g_list_next (l)) {
     CommandCallback *cc = l->data;
 
-    if (cc->stream_id != chunk->stream_id) {
+    if (cc->stream_id != meta->mstream) {
       continue;
     }
 
@@ -712,39 +818,6 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstRtmpChunk * chunk)
   g_ptr_array_unref (args);
 }
 
-static void
-gst_rtmp_connection_handle_user_control (GstRtmpConnection * connection,
-    guint32 event_type, guint32 event_data)
-{
-  switch (event_type) {
-    case GST_RTMP_USER_CONTROL_STREAM_BEGIN:
-      GST_DEBUG ("stream begin: %d", event_data);
-      break;
-    case GST_RTMP_USER_CONTROL_STREAM_EOF:
-      GST_ERROR ("stream EOF: %d", event_data);
-      break;
-    case GST_RTMP_USER_CONTROL_STREAM_DRY:
-      GST_ERROR ("stream dry: %d", event_data);
-      break;
-    case GST_RTMP_USER_CONTROL_SET_BUFFER_LENGTH:
-      GST_ERROR ("set buffer length: %d", event_data);
-      break;
-    case GST_RTMP_USER_CONTROL_STREAM_IS_RECORDED:
-      GST_ERROR ("stream is recorded: %d", event_data);
-      break;
-    case GST_RTMP_USER_CONTROL_PING_REQUEST:
-      GST_DEBUG ("ping request: %d", event_data);
-      gst_rtmp_connection_send_ping_response (connection, event_data);
-      break;
-    case GST_RTMP_USER_CONTROL_PING_RESPONSE:
-      GST_ERROR ("ping response: %d", event_data);
-      break;
-    default:
-      GST_ERROR ("unimplemented: %d, %d", event_type, event_data);
-      break;
-  }
-}
-
 static gboolean
 start_write (gpointer user_data)
 {
@@ -754,24 +827,50 @@ start_write (gpointer user_data)
   return G_SOURCE_REMOVE;
 }
 
-void
-gst_rtmp_connection_queue_chunk (GstRtmpConnection * self, GstRtmpChunk * chunk)
+static void
+byte_array_take_buffer (GByteArray * byte_array, GstBuffer * buffer)
 {
-  GstRtmpChunkCacheEntry *entry;
-  GBytes *bytes;
+  GstMapInfo map;
+  gboolean ret;
+  ret = gst_buffer_map (buffer, &map, GST_MAP_READ);
+  g_assert (ret);
+  g_assert (byte_array->len + map.size <= (guint64) G_MAXUINT);
+  g_byte_array_append (byte_array, map.data, map.size);
+  gst_buffer_unmap (buffer, &map);
+  gst_buffer_unref (buffer);
+}
+
+void
+gst_rtmp_connection_queue_message (GstRtmpConnection * self, GstBuffer * buffer)
+{
+  GstRtmpMeta *meta;
+  GstRtmpChunkStream *cstream;
+  GstBuffer *out_buffer;
+  GByteArray *out_ba;
 
   g_return_if_fail (GST_IS_RTMP_CONNECTION (self));
-  g_return_if_fail (chunk);
+  g_return_if_fail (GST_IS_BUFFER (buffer));
 
-  dump_chunk (chunk, TRUE);
+  meta = gst_buffer_get_rtmp_meta (buffer);
+  g_return_if_fail (meta);
 
-  entry = gst_rtmp_chunk_cache_get (self->output_chunk_cache,
-      chunk->chunk_stream_id);
-  bytes = gst_rtmp_chunk_serialize (chunk, &entry->previous_header,
+  cstream = gst_rtmp_chunk_streams_get (self->output_streams, meta->cstream);
+  g_return_if_fail (cstream);
+
+  out_buffer = gst_rtmp_chunk_stream_serialize_start (cstream, buffer,
       self->out_chunk_size);
-  gst_rtmp_chunk_free (chunk);
+  g_return_if_fail (out_buffer);
 
-  g_async_queue_push (self->output_queue, bytes);
+  out_ba = g_byte_array_new ();
+
+  while (out_buffer) {
+    byte_array_take_buffer (out_ba, out_buffer);
+
+    out_buffer = gst_rtmp_chunk_stream_serialize_next (cstream,
+        self->out_chunk_size);
+  }
+
+  g_async_queue_push (self->output_queue, g_byte_array_free_to_bytes (out_ba));
   g_main_context_invoke (self->main_context, start_write, g_object_ref (self));
 }
 
@@ -787,9 +886,12 @@ gst_rtmp_connection_send_command (GstRtmpConnection * connection,
     guint32 stream_id, const gchar * command_name, const GstAmfNode * argument,
     ...)
 {
-  GstRtmpChunk *chunk;
+  GstBuffer *buffer;
   gdouble transaction_id = 0;
   va_list ap;
+  GBytes *payload;
+  guint8 *data;
+  gsize size;
 
   if (connection->thread != g_thread_self ()) {
     GST_ERROR ("Called from wrong thread");
@@ -810,20 +912,16 @@ gst_rtmp_connection_send_command (GstRtmpConnection * connection,
         g_list_append (connection->command_callbacks, cc);
   }
 
-  chunk = gst_rtmp_chunk_new ();
-  chunk->chunk_stream_id = 3;
-  chunk->timestamp = 0;         /* FIXME */
-  chunk->message_type_id = GST_RTMP_MESSAGE_TYPE_COMMAND;
-  chunk->stream_id = stream_id;
-
   va_start (ap, argument);
-  chunk->payload = gst_amf_serialize_command_valist (transaction_id,
+  payload = gst_amf_serialize_command_valist (transaction_id,
       command_name, argument, ap);
   va_end (ap);
 
-  chunk->message_length = g_bytes_get_size (chunk->payload);
+  data = g_bytes_unref_to_data (payload, &size);
+  buffer = gst_rtmp_message_new_wrapped (GST_RTMP_MESSAGE_TYPE_COMMAND_AMF0,
+      3, stream_id, data, size);
 
-  gst_rtmp_connection_queue_chunk (connection, chunk);
+  gst_rtmp_connection_queue_message (connection, buffer);
   return transaction_id;
 }
 
@@ -851,21 +949,16 @@ gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
 static void
 gst_rtmp_connection_send_ack (GstRtmpConnection * connection)
 {
-  GstRtmpChunk *chunk;
+  GstBuffer *buffer;
   guint8 *data;
-
-  chunk = gst_rtmp_chunk_new ();
-  chunk->chunk_stream_id = 2;
-  chunk->timestamp = 0;
-  chunk->message_type_id = GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT;
-  chunk->stream_id = 0;
 
   data = g_malloc (4);
   GST_WRITE_UINT32_BE (data, connection->total_input_bytes);
-  chunk->payload = g_bytes_new_take (data, 4);
-  chunk->message_length = g_bytes_get_size (chunk->payload);
 
-  gst_rtmp_connection_queue_chunk (connection, chunk);
+  buffer = gst_rtmp_message_new_wrapped (GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT,
+      2, 0, data, 4);
+
+  gst_rtmp_connection_queue_message (connection, buffer);
 
   connection->bytes_since_ack = 0;
 }
@@ -874,40 +967,30 @@ static void
 gst_rtmp_connection_send_ping_response (GstRtmpConnection * connection,
     guint32 event_data)
 {
-  GstRtmpChunk *chunk;
+  GstBuffer *buffer;
   guint8 *data;
 
-  chunk = gst_rtmp_chunk_new ();
-  chunk->chunk_stream_id = 2;
-  chunk->timestamp = 0;
-  chunk->message_type_id = GST_RTMP_MESSAGE_TYPE_USER_CONTROL;
-  chunk->stream_id = 0;
-
   data = g_malloc (6);
-  GST_WRITE_UINT16_BE (data, GST_RTMP_USER_CONTROL_PING_RESPONSE);
+  GST_WRITE_UINT16_BE (data, GST_RTMP_USER_CONTROL_TYPE_PING_RESPONSE);
   GST_WRITE_UINT32_BE (data + 2, event_data);
-  chunk->payload = g_bytes_new_take (data, 6);
-  chunk->message_length = g_bytes_get_size (chunk->payload);
 
-  gst_rtmp_connection_queue_chunk (connection, chunk);
+  buffer = gst_rtmp_message_new_wrapped (GST_RTMP_MESSAGE_TYPE_USER_CONTROL,
+      2, 0, data, 6);
+
+  gst_rtmp_connection_queue_message (connection, buffer);
 }
 
 static void
 gst_rtmp_connection_send_window_size_request (GstRtmpConnection * connection)
 {
-  GstRtmpChunk *chunk;
+  GstBuffer *buffer;
   guint8 *data;
-
-  chunk = gst_rtmp_chunk_new ();
-  chunk->chunk_stream_id = 2;
-  chunk->timestamp = 0;
-  chunk->message_type_id = GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE;
-  chunk->stream_id = 0;
 
   data = g_malloc (4);
   GST_WRITE_UINT32_BE (data, connection->peer_bandwidth);
-  chunk->payload = g_bytes_new_take (data, 4);
-  chunk->message_length = g_bytes_get_size (chunk->payload);
 
-  gst_rtmp_connection_queue_chunk (connection, chunk);
+  buffer = gst_rtmp_message_new_wrapped (GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE,
+      2, 0, data, 4);
+
+  gst_rtmp_connection_queue_message (connection, buffer);
 }

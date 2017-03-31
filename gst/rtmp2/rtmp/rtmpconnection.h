@@ -22,8 +22,8 @@
 #define _GST_RTMP_CONNECTION_H_
 
 #include <gio/gio.h>
-#include <rtmp/rtmpchunk.h>
-#include <rtmp/amf.h>
+#include <gst/gst.h>
+#include "amf.h"
 
 G_BEGIN_DECLS
 
@@ -38,8 +38,8 @@ typedef struct _GstRtmpConnectionClass GstRtmpConnectionClass;
 
 typedef void (*GstRtmpConnectionFunc)
     (GstRtmpConnection * connection, gpointer user_data);
-typedef void (*GstRtmpConnectionChunkFunc)
-    (GstRtmpConnection * connection, GstRtmpChunk * chunk, gpointer user_data);
+typedef void (*GstRtmpConnectionMessageFunc)
+    (GstRtmpConnection * connection, GstBuffer * buffer, gpointer user_data);
 
 typedef void (*GstRtmpCommandCallback) (const gchar * command_name,
     GPtrArray * arguments, gpointer user_data);
@@ -51,7 +51,7 @@ void gst_rtmp_connection_close (GstRtmpConnection * connection);
 void gst_rtmp_connection_close_and_unref (gpointer ptr);
 
 void gst_rtmp_connection_set_input_handler (GstRtmpConnection * connection,
-    GstRtmpConnectionChunkFunc callback, gpointer user_data,
+    GstRtmpConnectionMessageFunc callback, gpointer user_data,
     GDestroyNotify user_data_destroy);
 
 void gst_rtmp_connection_set_output_handler (GstRtmpConnection * connection,
@@ -60,8 +60,8 @@ void gst_rtmp_connection_set_output_handler (GstRtmpConnection * connection,
 
 void gst_rtmp_connection_queue_bytes (GstRtmpConnection *self,
     GBytes * bytes);
-void gst_rtmp_connection_queue_chunk (GstRtmpConnection * connection,
-    GstRtmpChunk * chunk);
+void gst_rtmp_connection_queue_message (GstRtmpConnection * connection,
+    GstBuffer * buffer);
 guint gst_rtmp_connection_get_num_queued (GstRtmpConnection * connection);
 
 guint gst_rtmp_connection_send_command (GstRtmpConnection * connection,

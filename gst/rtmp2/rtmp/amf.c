@@ -679,16 +679,19 @@ parse_value (AmfParser * parser)
 }
 
 GPtrArray *
-gst_amf_parse_command (GBytes * bytes, gdouble * transaction_id,
-    gchar ** command_name)
+gst_amf_parse_command (const guint8 * data, gsize size,
+    gdouble * transaction_id, gchar ** command_name)
 {
   AmfParser parser = {
+    .data = data,
+    .size = size,
     .recursion_depth = 0,
   };
   GstAmfNode *node1 = NULL, *node2 = NULL, *node;
   GPtrArray *args = NULL;
 
-  parser.data = g_bytes_get_data (bytes, &parser.size);
+  g_return_val_if_fail (data, NULL);
+  g_return_val_if_fail (size, NULL);
 
   GST_LOG ("Starting parse with %" G_GSIZE_FORMAT " bytes", parser.size);
 
