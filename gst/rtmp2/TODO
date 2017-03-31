@@ -1,15 +1,17 @@
-
-Some TODO items:
-
-- Rework rtmpchunk.c to match RTMP spec usage (Chunk is really a Message)
-  - Use GstBuffer for messages (gst_buffer_add_meta for the internal data)
-
 - rtmp2sink: Should look into reconnecting and resuming stream without
   deleting and recreating stream, which drops clients.
 
-- Server implementation
+- Move AMF parser/serializer to GstRtmpMeta?
+- Move AMF nodes from g_slice to GstMiniObject?
+
+- Refactor connection, pull out the ad-hoc read and write handling and put it
+  with the chunk layer into GBuffered{In,Out}putStream subclasses
+
+- Refactor elements and pull out the common connection+mainloop handling code
+  into a context object
 
 - Post-connect onStatus handling (needed for src EOS and async errors?)
+  Handle 'user control' stream-eof
 
 - Better mux/demux, at the cost of losing compatibility with flvmux/demux.
 
@@ -33,6 +35,8 @@ Some TODO items:
   - Request src pad to play a stream
   - Request sink pad to publish a stream (base it on GstAggregator?)
   - rtmp2sink/src just specialize the client element with a static pad
+
+- Server implementation
 
 Needed testing:
 
