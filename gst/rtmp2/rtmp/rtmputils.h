@@ -26,8 +26,6 @@ G_BEGIN_DECLS
 
 #define GST_RTMP_DEFAULT_PORT 1935
 
-void gst_rtmp_dump_bytes (const gchar * string, GBytes * bytes);
-
 void gst_rtmp_byte_array_append_bytes (GByteArray * bytearray, GBytes * bytes);
 
 void gst_rtmp_input_stream_read_all_bytes_async (GInputStream * stream,

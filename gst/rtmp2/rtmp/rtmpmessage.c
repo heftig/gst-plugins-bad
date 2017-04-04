@@ -23,7 +23,9 @@
 
 #include "rtmpmessage.h"
 #include "rtmpchunkstream.h"
-#include "rtmpdebug.h"
+
+GST_DEBUG_CATEGORY_STATIC (gst_rtmp_message_debug_category);
+#define GST_CAT_DEFAULT gst_rtmp_message_debug_category
 
 gboolean
 gst_rtmp_message_type_is_valid (GstRtmpMessageType type)
@@ -125,6 +127,8 @@ gst_rtmp_meta_api_get_type (void)
 
   if (g_once_init_enter (&type)) {
     GType _type = gst_meta_api_type_register ("GstRtmpMetaAPI", tags);
+    GST_DEBUG_CATEGORY_INIT (gst_rtmp_message_debug_category,
+        "rtmpmessage", 0, "debug category for rtmp messages");
     g_once_init_leave (&type, _type);
   }
   return type;
