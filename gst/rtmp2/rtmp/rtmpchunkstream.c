@@ -24,8 +24,19 @@
 #include "rtmpchunkstream.h"
 #include "rtmputils.h"
 
-GST_DEBUG_CATEGORY_EXTERN (gst_rtmp_chunk_stream_debug_category);
+GST_DEBUG_CATEGORY_STATIC (gst_rtmp_chunk_stream_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_chunk_stream_debug_category
+
+static void
+init_debug (void)
+{
+  static volatile gsize done = 0;
+  if (g_once_init_enter (&done)) {
+    GST_DEBUG_CATEGORY_INIT (gst_rtmp_chunk_stream_debug_category,
+        "rtmpchunkstream", 0, "debug category for rtmp chunk streams");
+    g_once_init_leave (&done, 1);
+  }
+}
 
 enum
 {
@@ -644,7 +655,11 @@ gst_rtmp_chunk_stream_serialize_next (GstRtmpChunkStream * cstream,
 GstRtmpChunkStreams *
 gst_rtmp_chunk_streams_new (void)
 {
-  GstRtmpChunkStreams *cstreams = g_slice_new (GstRtmpChunkStreams);
+  GstRtmpChunkStreams *cstreams;
+
+  init_debug ();
+
+  cstreams = g_slice_new (GstRtmpChunkStreams);
   cstreams->array = g_array_new (FALSE, TRUE, sizeof (GstRtmpChunkStream));
   g_array_set_clear_func (cstreams->array,
       (GDestroyNotify) gst_rtmp_chunk_stream_clear);

@@ -40,7 +40,6 @@ noinst_HEADERS = \
 	rtmp/rtmpchunkstream.h \
 	rtmp/rtmpclient.h \
 	rtmp/rtmpconnection.h \
-	rtmp/rtmpdebug.h \
 	rtmp/rtmphandshake.h \
 	rtmp/rtmpmessage.h \
 	rtmp/rtmputils.h \
