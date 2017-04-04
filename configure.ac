@@ -3670,6 +3670,7 @@ gst/pnm/Makefile
 gst/rawparse/Makefile
 gst/removesilence/Makefile
 gst/rtmp2/Makefile
+gst/rtmp2/rtmp/Makefile
 gst/sdi/Makefile
 gst/sdp/Makefile
 gst/segmentclip/Makefile
