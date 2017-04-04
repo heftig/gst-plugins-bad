@@ -1,17 +1,12 @@
 plugin_LTLIBRARIES = libgstrtmp2.la
 
+SUBDIRS = rtmp
+
 libgstrtmp2_la_SOURCES = \
 	gstrtmp2.c \
 	gstrtmp2locationhandler.c \
 	gstrtmp2sink.c \
 	gstrtmp2src.c \
-	rtmp/amf.c \
-	rtmp/rtmpchunkstream.c \
-	rtmp/rtmpclient.c \
-	rtmp/rtmpconnection.c \
-	rtmp/rtmphandshake.c \
-	rtmp/rtmpmessage.c \
-	rtmp/rtmputils.c \
 	$(NULL)
 
 libgstrtmp2_la_CFLAGS = \
@@ -22,6 +17,7 @@ libgstrtmp2_la_CFLAGS = \
 	$(NULL)
 
 libgstrtmp2_la_LIBADD = \
+	$(top_builddir)/gst/rtmp2/rtmp/libgstrtmp2-rtmp.la \
 	$(GST_PLUGINS_BASE_LIBS) \
 	$(GST_BASE_LIBS) \
 	$(GST_LIBS) \
@@ -36,11 +32,4 @@ noinst_HEADERS = \
 	gstrtmp2locationhandler.h \
 	gstrtmp2sink.h \
 	gstrtmp2src.h \
-	rtmp/amf.h \
-	rtmp/rtmpchunkstream.h \
-	rtmp/rtmpclient.h \
-	rtmp/rtmpconnection.h \
-	rtmp/rtmphandshake.h \
-	rtmp/rtmpmessage.h \
-	rtmp/rtmputils.h \
 	$(NULL)
