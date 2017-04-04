@@ -27,8 +27,19 @@
 #include <gst/gst.h>
 #include <string.h>
 
-GST_DEBUG_CATEGORY_EXTERN (gst_rtmp_handshake_debug_category);
+GST_DEBUG_CATEGORY_STATIC (gst_rtmp_handshake_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_handshake_debug_category
+
+static void
+init_debug (void)
+{
+  static volatile gsize done = 0;
+  if (g_once_init_enter (&done)) {
+    GST_DEBUG_CATEGORY_INIT (gst_rtmp_handshake_debug_category, "rtmphandshake",
+        0, "debug category for the rtmp connection handshake");
+    g_once_init_leave (&done, 1);
+  }
+}
 
 static void client_handshake1_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
@@ -102,6 +113,7 @@ gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
 
   g_return_if_fail (G_IS_IO_STREAM (stream));
 
+  init_debug ();
   GST_INFO ("Starting client handshake");
 
   task = g_task_new (stream, cancellable, callback, user_data);

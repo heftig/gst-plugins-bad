@@ -29,8 +29,19 @@
 
 #define MAX_RECURSION_DEPTH 16
 
-GST_DEBUG_CATEGORY_EXTERN (gst_rtmp_amf_debug_category);
+GST_DEBUG_CATEGORY_STATIC (gst_rtmp_amf_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_amf_debug_category
+
+static void
+init_debug (void)
+{
+  static volatile gsize done = 0;
+  if (g_once_init_enter (&done)) {
+    GST_DEBUG_CATEGORY_INIT (gst_rtmp_amf_debug_category, "rtmpamf", 0,
+        "debug category for the amf parser");
+    g_once_init_leave (&done, 1);
+  }
+}
 
 const gchar *
 gst_amf_type_get_nick (GstAmfType type)
@@ -125,6 +136,8 @@ static GstAmfNode *
 node_new (GstAmfType type)
 {
   GstAmfNode *node;
+
+  init_debug ();
 
   node = g_slice_alloc0 (sizeof *node);
   node->type = type;
@@ -692,6 +705,8 @@ gst_amf_parse_command (const guint8 * data, gsize size,
 
   g_return_val_if_fail (data, NULL);
   g_return_val_if_fail (size, NULL);
+
+  init_debug ();
 
   GST_LOG ("Starting parse with %" G_GSIZE_FORMAT " bytes", parser.size);
 

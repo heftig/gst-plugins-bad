@@ -21,28 +21,13 @@
 #include "config.h"
 #endif
 
-#include <gst/gst.h>
-
 #include "rtmputils.h"
-#include "rtmpdebug.h"
-
 #include <string.h>
 
 static void read_all_bytes_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
 static void write_all_bytes_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
-
-void
-gst_rtmp_dump_bytes (const gchar * string, GBytes * bytes)
-{
-  if (G_UNLIKELY (GST_LEVEL_MEMDUMP <= _gst_debug_min) && GST_LEVEL_MEMDUMP <=
-      gst_debug_category_get_threshold (GST_CAT_DEFAULT)) {
-    gsize size;
-    const guint8 *data = g_bytes_get_data (bytes, &size);
-    GST_MEMDUMP (string, data, size);
-  }
-}
 
 void
 gst_rtmp_byte_array_append_bytes (GByteArray * bytearray, GBytes * bytes)
