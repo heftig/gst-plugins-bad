@@ -148,6 +148,7 @@ command_callback_free (gpointer ptr)
 enum
 {
   SIGNAL_ERROR,
+  SIGNAL_STREAM_CONTROL,
 
   N_SIGNALS
 };
@@ -171,6 +172,10 @@ gst_rtmp_connection_class_init (GstRtmpConnectionClass * klass)
 
   signals[SIGNAL_ERROR] = g_signal_new ("error", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+
+  signals[SIGNAL_STREAM_CONTROL] = g_signal_new ("stream-control",
+      G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+      G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_UINT);
 
   GST_DEBUG_REGISTER_FUNCPTR (gst_rtmp_connection_do_read);
 }
@@ -645,24 +650,18 @@ gst_rtmp_connection_handle_user_control (GstRtmpConnection * connection,
 
   switch (uc.type) {
     case GST_RTMP_USER_CONTROL_TYPE_STREAM_BEGIN:
-      GST_DEBUG ("ignoring stream begin: %" G_GUINT32_FORMAT, uc.param);
-      break;
-
     case GST_RTMP_USER_CONTROL_TYPE_STREAM_EOF:
-      GST_ERROR ("unimplemented stream EOF: %" G_GUINT32_FORMAT, uc.param);
-      break;
-
     case GST_RTMP_USER_CONTROL_TYPE_STREAM_DRY:
-      GST_DEBUG ("ignoring stream dry: %" G_GUINT32_FORMAT, uc.param);
+    case GST_RTMP_USER_CONTROL_TYPE_STREAM_IS_RECORDED:
+      GST_INFO ("stream %u got %s", uc.param,
+          gst_rtmp_user_control_type_get_nick (uc.type));
+      g_signal_emit (connection, signals[SIGNAL_STREAM_CONTROL], 0,
+          uc.type, uc.param);
       break;
 
     case GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH:
       GST_FIXME ("ignoring set buffer length: %" G_GUINT32_FORMAT ", %"
           G_GUINT32_FORMAT " ms", uc.param, uc.param2);
-      break;
-
-    case GST_RTMP_USER_CONTROL_TYPE_STREAM_IS_RECORDED:
-      GST_DEBUG ("ignoring stream-is-recorded: %" G_GUINT32_FORMAT, uc.param);
       break;
 
     case GST_RTMP_USER_CONTROL_TYPE_PING_REQUEST:
