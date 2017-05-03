@@ -366,3 +366,55 @@ err:
   gst_buffer_unmap (buffer, &map);
   return ret;
 }
+
+gboolean
+gst_rtmp_message_parse_user_control (GstBuffer * buffer,
+    GstRtmpUserControl * out)
+{
+  GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (buffer);
+  GstMapInfo map;
+  GstRtmpUserControl uc;
+  gsize uc_size = 6;
+  gboolean ret = FALSE;
+
+  g_return_val_if_fail (meta, FALSE);
+  g_return_val_if_fail (meta->type == GST_RTMP_MESSAGE_TYPE_USER_CONTROL,
+      FALSE);
+
+  if (!gst_buffer_map (buffer, &map, GST_MAP_READ)) {
+    GST_ERROR ("can't map user control message");
+    return FALSE;
+  }
+
+  if (map.size < 2) {
+    GST_ERROR ("can't read user control type");
+    goto err;
+  }
+
+  uc.type = GST_READ_UINT16_BE (map.data);
+  if (uc.type == GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH) {
+    uc_size = 10;
+  }
+
+  if (map.size < uc_size) {
+    GST_ERROR ("can't read user control param");
+    goto err;
+  } else if (map.size > uc_size) {
+    GST_WARNING ("overlength user control: %" G_GSIZE_FORMAT " > %"
+        G_GSIZE_FORMAT, map.size, uc_size);
+  }
+
+  if (uc.type == GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH) {
+    uc.param2 = GST_READ_UINT32_BE (map.data + 6);
+  }
+  uc.param = GST_READ_UINT32_BE (map.data + 2);
+
+  ret = TRUE;
+  if (out) {
+    *out = uc;
+  }
+
+err:
+  gst_buffer_unmap (buffer, &map);
+  return ret;
+}

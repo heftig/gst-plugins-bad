@@ -111,6 +111,20 @@ typedef struct {
 gboolean gst_rtmp_message_parse_protocol_control (GstBuffer * buffer,
     GstRtmpProtocolControl * out);
 
+typedef struct {
+  GstRtmpUserControlType type;
+
+  /* for STREAM_BEGIN to STREAM_IS_RECORDED: message stream ID */
+  /* for PING_REQUEST and PING_RESPONSE: timestamp of request */
+  guint32 param;
+
+  /* for SET_BUFFER_LENGTH: buffer length in ms */
+  guint32 param2;
+} GstRtmpUserControl;
+
+gboolean gst_rtmp_message_parse_user_control (GstBuffer * buffer,
+    GstRtmpUserControl * out);
+
 G_END_DECLS
 
 #endif
