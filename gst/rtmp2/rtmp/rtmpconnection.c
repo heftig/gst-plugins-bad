@@ -684,68 +684,68 @@ gst_rtmp_connection_handle_user_control (GstRtmpConnection * connection,
 
   switch (type) {
     case GST_RTMP_USER_CONTROL_TYPE_STREAM_BEGIN:
-      if (map.size < 4) {
+      if (map.size < 6) {
         GST_ERROR ("can't read stream id");
         break;
       }
-      param = GST_READ_UINT32_BE (map.data);
+      param = GST_READ_UINT32_BE (map.data + 2);
       GST_DEBUG ("ignoring stream begin: %" G_GUINT32_FORMAT, param);
       break;
 
     case GST_RTMP_USER_CONTROL_TYPE_STREAM_EOF:
-      if (map.size < 4) {
+      if (map.size < 6) {
         GST_ERROR ("can't read stream id");
         break;
       }
-      param = GST_READ_UINT32_BE (map.data);
+      param = GST_READ_UINT32_BE (map.data + 2);
       GST_ERROR ("unimplemented stream EOF: %" G_GUINT32_FORMAT, param);
       break;
 
     case GST_RTMP_USER_CONTROL_TYPE_STREAM_DRY:
-      if (map.size < 4) {
+      if (map.size < 6) {
         GST_ERROR ("can't read stream id");
         break;
       }
-      param = GST_READ_UINT32_BE (map.data);
+      param = GST_READ_UINT32_BE (map.data + 2);
       GST_DEBUG ("ignoring stream dry: %" G_GUINT32_FORMAT, param);
       break;
 
     case GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH:
-      if (map.size < 8) {
+      if (map.size < 10) {
         GST_ERROR ("can't read buffer length");
         break;
       }
-      param = GST_READ_UINT32_BE (map.data);
-      param2 = GST_READ_UINT32_BE (map.data + 4);
+      param = GST_READ_UINT32_BE (map.data + 2);
+      param2 = GST_READ_UINT32_BE (map.data + 6);
       GST_FIXME ("ignoring set buffer length: %" G_GUINT32_FORMAT ", %"
           G_GUINT32_FORMAT " ms", param, param2);
       break;
 
     case GST_RTMP_USER_CONTROL_TYPE_STREAM_IS_RECORDED:
-      if (map.size < 4) {
+      if (map.size < 6) {
         GST_ERROR ("can't read stream id");
         break;
       }
-      param = GST_READ_UINT32_BE (map.data);
+      param = GST_READ_UINT32_BE (map.data + 2);
       GST_ERROR ("unimplemented stream-is-recorded: %" G_GUINT32_FORMAT, param);
       break;
 
     case GST_RTMP_USER_CONTROL_TYPE_PING_REQUEST:
-      if (map.size < 4) {
+      if (map.size < 6) {
         GST_ERROR ("can't read ping data");
         break;
       }
-      param = GST_READ_UINT32_BE (map.data);
+      param = GST_READ_UINT32_BE (map.data + 2);
       GST_DEBUG ("ping request: %" G_GUINT32_FORMAT, param);
       gst_rtmp_connection_send_ping_response (connection, param);
       break;
 
     case GST_RTMP_USER_CONTROL_TYPE_PING_RESPONSE:
-      if (map.size < 4) {
+      if (map.size < 6) {
         GST_ERROR ("can't read ping data");
         break;
       }
-      param = GST_READ_UINT32_BE (map.data);
+      param = GST_READ_UINT32_BE (map.data + 2);
       GST_DEBUG ("ignoring ping response: %" G_GUINT32_FORMAT, param);
       break;
 
