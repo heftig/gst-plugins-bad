@@ -10,6 +10,8 @@
 - Refactor elements and pull out the common connection+mainloop handling code
   into a context object
 
+- Use glib-mkenums to generate GEnumClasses
+
 - Post-connect onStatus handling (needed for src EOS and async errors?)
   Handle 'user control' stream-eof
 
