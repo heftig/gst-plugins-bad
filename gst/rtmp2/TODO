@@ -13,7 +13,6 @@
 - Use glib-mkenums to generate GEnumClasses
 
 - Post-connect onStatus handling (needed for src EOS and async errors?)
-  Handle 'user control' stream-eof
 
 - Better mux/demux, at the cost of losing compatibility with flvmux/demux.
 

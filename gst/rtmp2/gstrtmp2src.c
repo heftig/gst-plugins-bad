@@ -644,6 +644,20 @@ connection_error (GstRtmpConnection * connection, GstRtmp2Src * rtmp2src)
 }
 
 static void
+stream_control (GstRtmpConnection * connection, gint uc_type, guint stream_id,
+    GstRtmp2Src * rtmp2src)
+{
+  GST_INFO_OBJECT (rtmp2src, "stream %u got %s", stream_id,
+      gst_rtmp_user_control_type_get_nick (uc_type));
+
+  if (uc_type == GST_RTMP_USER_CONTROL_TYPE_STREAM_EOF && stream_id == 1) {
+    GST_INFO_OBJECT (rtmp2src, "went EOS");
+    gst_task_stop (rtmp2src->task);
+    g_main_loop_quit (rtmp2src->task_main_loop);
+  }
+}
+
+static void
 connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
 {
   GstRtmp2Src *rtmp2src = GST_RTMP2_SRC (object);
@@ -662,6 +676,8 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
         got_message, g_object_ref (rtmp2src), g_object_unref);
     g_signal_connect_object (rtmp2src->connection, "error",
         G_CALLBACK (connection_error), rtmp2src, 0);
+    g_signal_connect_object (rtmp2src->connection, "stream-control",
+        G_CALLBACK (stream_control), rtmp2src, 0);
   } else {
     if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
       GST_ELEMENT_ERROR (rtmp2src, RESOURCE, NOT_AUTHORIZED,
