@@ -84,7 +84,6 @@ gst_buffer_get_rtmp_meta (GstBuffer * buffer)
   return (GstRtmpMeta *) gst_buffer_get_meta (buffer, GST_RTMP_META_API_TYPE);
 }
 
-
 GstBuffer * gst_rtmp_message_new (GstRtmpMessageType type, guint32 cstream,
     guint32 mstream);
 GstBuffer * gst_rtmp_message_new_wrapped (GstRtmpMessageType type, guint32 cstream,
@@ -95,6 +94,22 @@ void gst_rtmp_buffer_dump (GstBuffer * buffer, const gchar * prefix);
 GstRtmpMessageType gst_rtmp_message_get_type (GstBuffer * buffer);
 gboolean gst_rtmp_message_is_protocol_control (GstBuffer * buffer);
 gboolean gst_rtmp_message_is_user_control (GstBuffer * buffer);
+
+typedef struct {
+  GstRtmpMessageType type;
+
+  /* for SET_CHUNK_SIZE: chunk size */
+  /* for ABORT_MESSAGE: chunk stream ID */
+  /* for ACKNOWLEDGEMENT: acknowledged byte count */
+  /* for WINDOW_ACK_SIZE and SET_PEER_BANDWIDTH: acknowledgement window size */
+  guint32 param;
+
+  /* for SET_PEER_BANDWIDTH: limit type */
+  guint8 param2;
+} GstRtmpProtocolControl;
+
+gboolean gst_rtmp_message_parse_protocol_control (GstBuffer * buffer,
+    GstRtmpProtocolControl * out);
 
 G_END_DECLS
 

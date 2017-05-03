@@ -321,3 +321,48 @@ gst_rtmp_message_is_user_control (GstBuffer * buffer)
       return FALSE;
   }
 }
+
+gboolean
+gst_rtmp_message_parse_protocol_control (GstBuffer * buffer,
+    GstRtmpProtocolControl * out)
+{
+  GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (buffer);
+  GstMapInfo map;
+  GstRtmpProtocolControl pc;
+  gsize pc_size = 4;
+  gboolean ret = FALSE;
+
+  g_return_val_if_fail (meta, FALSE);
+
+  if (!gst_buffer_map (buffer, &map, GST_MAP_READ)) {
+    GST_ERROR ("can't map protocol control message");
+    return FALSE;
+  }
+
+  pc.type = meta->type;
+  if (pc.type == GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH) {
+    pc_size = 5;
+  }
+
+  if (map.size < pc_size) {
+    GST_ERROR ("can't read protocol control param");
+    goto err;
+  } else if (map.size > pc_size) {
+    GST_WARNING ("overlength protocol control: %" G_GSIZE_FORMAT " > %"
+        G_GSIZE_FORMAT, map.size, pc_size);
+  }
+
+  if (pc.type == GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH) {
+    pc.param2 = GST_READ_UINT8 (map.data + 4);
+  }
+  pc.param = GST_READ_UINT32_BE (map.data);
+
+  ret = TRUE;
+  if (out) {
+    *out = pc;
+  }
+
+err:
+  gst_buffer_unmap (buffer, &map);
+  return ret;
+}
