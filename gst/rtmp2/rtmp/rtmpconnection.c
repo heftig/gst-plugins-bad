@@ -581,82 +581,52 @@ static void
 gst_rtmp_connection_handle_protocol_control (GstRtmpConnection * connection,
     GstBuffer * buffer)
 {
-  GstRtmpMessageType type = gst_rtmp_message_get_type (buffer);
-  GstMapInfo map;
-  guint32 param, param2;
+  GstRtmpProtocolControl pc;
 
-  if (!gst_buffer_map (buffer, &map, GST_MAP_READ)) {
-    GST_ERROR ("can't map protocol control message");
+  if (!gst_rtmp_message_parse_protocol_control (buffer, &pc)) {
+    GST_ERROR ("can't parse protocol control message");
     return;
   }
 
-  GST_LOG ("got protocol control message %d:%s", type,
-      gst_rtmp_message_type_get_nick (type));
+  GST_LOG ("got protocol control message %d:%s", pc.type,
+      gst_rtmp_message_type_get_nick (pc.type));
 
-  switch (type) {
+  switch (pc.type) {
     case GST_RTMP_MESSAGE_TYPE_SET_CHUNK_SIZE:
-      if (map.size < 4) {
-        GST_ERROR ("can't read chunk size");
-        break;
-      }
-      param = GST_READ_UINT32_BE (map.data);
-      GST_INFO ("new chunk size %" G_GUINT32_FORMAT, param);
-      connection->in_chunk_size = param;
+      GST_INFO ("new chunk size %" G_GUINT32_FORMAT, pc.param);
+      connection->in_chunk_size = pc.param;
       break;
 
     case GST_RTMP_MESSAGE_TYPE_ABORT_MESSAGE:
-      if (map.size < 4) {
-        GST_ERROR ("can't read stream id");
-        break;
-      }
-      param = GST_READ_UINT32_BE (map.data);
       GST_ERROR ("unimplemented: chunk abort, stream_id = %" G_GUINT32_FORMAT,
-          param);
+          pc.param);
       break;
 
     case GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT:
-      if (map.size < 4) {
-        GST_ERROR ("can't read acked bytes");
-        break;
-      }
-      param = GST_READ_UINT32_BE (map.data);
       /* We don't really send ack requests that we care about, so ignore */
-      GST_DEBUG ("acknowledgement %" G_GUINT32_FORMAT, param);
+      GST_DEBUG ("acknowledgement %" G_GUINT32_FORMAT, pc.param);
       break;
 
     case GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE:
-      if (map.size < 4) {
-        GST_ERROR ("can't read window ack size");
-        break;
-      }
-      param = GST_READ_UINT32_BE (map.data);
-      GST_INFO ("window ack size: %" G_GUINT32_FORMAT, param);
-      connection->window_ack_size = param;
+      GST_INFO ("window ack size: %" G_GUINT32_FORMAT, pc.param);
+      connection->window_ack_size = pc.param;
       break;
 
     case GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH:
-      if (map.size < 5) {
-        GST_ERROR ("can't read peer bandwidth");
-        break;
-      }
-      param = GST_READ_UINT32_BE (map.data);
-      param2 = GST_READ_UINT8 (map.data + 4);
       GST_FIXME ("set peer bandwidth: %" G_GUINT32_FORMAT ", %"
-          G_GUINT32_FORMAT, param, param2);
+          G_GUINT32_FORMAT, pc.param, pc.param2);
       /* FIXME this is not correct, but close enough */
-      if (connection->peer_bandwidth != param) {
-        connection->peer_bandwidth = param;
+      if (connection->peer_bandwidth != pc.param) {
+        connection->peer_bandwidth = pc.param;
         gst_rtmp_connection_send_window_size_request (connection);
       }
       break;
 
     default:
-      GST_ERROR ("unimplemented protocol control type %d:%s", type,
-          gst_rtmp_message_type_get_nick (type));
+      GST_ERROR ("unimplemented protocol control type %d:%s", pc.type,
+          gst_rtmp_message_type_get_nick (pc.type));
       break;
   }
-
-  gst_buffer_unmap (buffer, &map);
 }
 
 static void
