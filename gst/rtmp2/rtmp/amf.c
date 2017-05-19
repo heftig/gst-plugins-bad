@@ -653,7 +653,7 @@ parse_value (AmfParser * parser)
 
   type = parse_u8 (parser);
   node = node_new (type);
-  GST_TRACE ("parsing AMF type %d", type);
+  GST_TRACE ("parsing AMF type %d (%s)", type, gst_amf_type_get_nick (type));
 
   parser->recursion_depth++;
   if (parser->recursion_depth > MAX_RECURSION_DEPTH) {
@@ -683,7 +683,8 @@ parse_value (AmfParser * parser)
     case GST_AMF_TYPE_UNSUPPORTED:
       break;
     default:
-      GST_ERROR ("unimplemented AMF type %d", type);
+      GST_ERROR ("unimplemented AMF type %d (%s)", type,
+          gst_amf_type_get_nick (type));
       break;
   }
 
@@ -848,7 +849,8 @@ serialize_value (GByteArray * array, const GstAmfNode * node)
     case GST_AMF_TYPE_UNSUPPORTED:
       break;
     default:
-      GST_ERROR ("unimplemented AMF type %d", node->type);
+      GST_ERROR ("unimplemented AMF type %d (%s)", node->type,
+          gst_amf_type_get_nick (node->type));
       break;
   }
 }
