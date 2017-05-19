@@ -464,7 +464,7 @@ buffer_to_message (GstRtmp2Sink * self, GstBuffer * buffer, GstBuffer ** outbuf)
     GstMapInfo info;
 
     if (G_UNLIKELY (!gst_buffer_map (buffer, &info, GST_MAP_READ))) {
-      GST_ERROR ("map failed: %" GST_PTR_FORMAT, buffer);
+      GST_ERROR_OBJECT (self, "map failed: %" GST_PTR_FORMAT, buffer);
       return FALSE;
     }
 
@@ -473,14 +473,14 @@ buffer_to_message (GstRtmp2Sink * self, GstBuffer * buffer, GstBuffer ** outbuf)
 
     if (G_UNLIKELY (info.size >= 4 && memcmp (info.data, "FLV", 3) == 0)) {
       /* drop the header, we don't need it */
-      GST_DEBUG ("ignoring FLV header: %" GST_PTR_FORMAT, buffer);
+      GST_DEBUG_OBJECT (self, "ignoring FLV header: %" GST_PTR_FORMAT, buffer);
       gst_buffer_unmap (buffer, &info);
       *outbuf = NULL;
       return TRUE;
     }
 
     if (G_UNLIKELY (info.size < 11 + 4)) {
-      GST_ERROR ("too small: %" GST_PTR_FORMAT, buffer);
+      GST_ERROR_OBJECT (self, "too small: %" GST_PTR_FORMAT, buffer);
       gst_buffer_unmap (buffer, &info);
       return FALSE;
     }
@@ -495,8 +495,8 @@ buffer_to_message (GstRtmp2Sink * self, GstBuffer * buffer, GstBuffer ** outbuf)
 
     /* FIXME: flvmux timestamps roll over after about 49 days */
     if (timestamp + self->base_ts < self->last_ts) {
-      GST_WARNING ("Timestamp regression %" G_GUINT64_FORMAT " -> %"
-          G_GUINT64_FORMAT "; assuming overflow", self->last_ts,
+      GST_WARNING_OBJECT (self, "Timestamp regression %" G_GUINT64_FORMAT
+          " -> %" G_GUINT64_FORMAT "; assuming overflow", self->last_ts,
           timestamp + self->base_ts);
       self->base_ts += G_MAXUINT32;
       self->base_ts += 1;
@@ -521,7 +521,7 @@ buffer_to_message (GstRtmp2Sink * self, GstBuffer * buffer, GstBuffer ** outbuf)
       break;
 
     default:
-      GST_ERROR ("unknown tag type %d", type);
+      GST_ERROR_OBJECT (self, "unknown tag type %d", type);
       return FALSE;
   }
 
