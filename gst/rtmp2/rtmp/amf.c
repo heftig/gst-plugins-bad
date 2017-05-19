@@ -400,11 +400,16 @@ gst_amf_node_append_field_take_string (GstAmfNode * node, const gchar * name,
 /* Dumper *******************************************************************/
 
 static inline void
-dump_indent (GString * string, guint indent)
+dump_indent (GString * string, gint indent, guint depth)
 {
-  guint i;
-  for (i = 0; i < indent; i++) {
+  if (indent < 0) {
     g_string_append_c (string, ' ');
+  } else {
+    guint i;
+    g_string_append_c (string, '\n');
+    for (i = 0; i < indent + depth * 2; i++) {
+      g_string_append_c (string, ' ');
+    }
   }
 }
 
@@ -417,7 +422,7 @@ dump_string (GString * string, const gchar * value)
 }
 
 static void
-dump_node (GString * string, const GstAmfNode * node, gboolean multiline,
+dump_node (GString * string, const GstAmfNode * node, gint indent,
     guint recursion_depth)
 {
   const gchar *object_delim = "{}";
@@ -441,23 +446,19 @@ dump_node (GString * string, const GstAmfNode * node, gboolean multiline,
     case GST_AMF_TYPE_OBJECT:{
       guint i, len = gst_amf_node_get_num_fields (node);
       g_string_append_c (string, object_delim[0]);
-      g_string_append_c (string, multiline ? '\n' : ' ');
-      for (i = 0; i < len; i++) {
-        const AmfObjectField *field = get_field (node, i);
-        if (multiline) {
-          dump_indent (string, recursion_depth * 2);
+      if (len) {
+        for (i = 0; i < len; i++) {
+          const AmfObjectField *field = get_field (node, i);
+          dump_indent (string, indent, recursion_depth + 1);
+          dump_string (string, field->name);
+          g_string_append_c (string, ':');
+          g_string_append_c (string, ' ');
+          dump_node (string, field->value, indent, recursion_depth + 1);
+          if (i < len - 1) {
+            g_string_append_c (string, ',');
+          }
         }
-        dump_string (string, field->name);
-        g_string_append_c (string, ':');
-        g_string_append_c (string, ' ');
-        dump_node (string, field->value, multiline, recursion_depth + 1);
-        if (i < len - 1) {
-          g_string_append_c (string, ',');
-        }
-        g_string_append_c (string, ' ');
-      }
-      if (multiline) {
-        dump_indent (string, recursion_depth * 2);
+        dump_indent (string, indent, recursion_depth);
       }
       g_string_append_c (string, object_delim[1]);
       break;
@@ -470,10 +471,9 @@ dump_node (GString * string, const GstAmfNode * node, gboolean multiline,
 }
 
 void
-gst_amf_node_dump (const GstAmfNode * node, gboolean multiline,
-    GString * string)
+gst_amf_node_dump (const GstAmfNode * node, gint indent, GString * string)
 {
-  dump_node (string, node, multiline, 0);
+  dump_node (string, node, indent, 0);
 }
 
 static void
@@ -482,7 +482,7 @@ dump_argument (const GstAmfNode * node, guint n)
   if (G_UNLIKELY (GST_LEVEL_LOG <= _gst_debug_min) &&
       GST_LEVEL_LOG <= gst_debug_category_get_threshold (GST_CAT_DEFAULT)) {
     GString *string = g_string_new (NULL);
-    gst_amf_node_dump (node, FALSE, string);
+    gst_amf_node_dump (node, -1, string);
     GST_LOG ("Argument #%u: %s", n, string->str);
     g_string_free (string, TRUE);
   }

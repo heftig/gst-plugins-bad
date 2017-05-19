@@ -92,7 +92,7 @@ void gst_amf_node_append_field_string (GstAmfNode * node,
 void gst_amf_node_append_field_take_string (GstAmfNode * node,
     const gchar * name, gchar * value);
 
-void gst_amf_node_dump (const GstAmfNode * node, gboolean multiline,
+void gst_amf_node_dump (const GstAmfNode * node, gint indent,
     GString * string);
 
 GPtrArray * gst_amf_parse_command (const guint8 * data, gsize size,
