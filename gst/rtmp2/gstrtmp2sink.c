@@ -609,24 +609,28 @@ send_message (GstRtmp2Sink * self, GstBuffer * message)
 
   g_mutex_lock (&self->lock);
 
-  while (G_UNLIKELY (!self->flushing && !self->connection)) {
+  while (G_UNLIKELY (!self->flushing && !self->connection &&
+          self->connect_task)) {
     GST_DEBUG_OBJECT (self, "waiting for connection");
     g_cond_wait (&self->cond, &self->lock);
   }
 
-  while (G_UNLIKELY (!self->flushing &&
+  while (G_UNLIKELY (!self->flushing && self->connection &&
           gst_rtmp_connection_get_num_queued (self->connection) > 3)) {
     GST_LOG_OBJECT (self, "waiting for queue");
     g_cond_wait (&self->cond, &self->lock);
   }
 
-  if (G_LIKELY (!self->flushing)) {
+  if (G_UNLIKELY (self->flushing)) {
+    gst_buffer_unref (message);
+    ret = GST_FLOW_FLUSHING;
+  } else if (G_UNLIKELY (!self->connection)) {
+    gst_buffer_unref (message);
+    ret = GST_FLOW_ERROR;
+  } else {
     send_streamheader (self);
     gst_rtmp_connection_queue_message (self->connection, message);
     ret = GST_FLOW_OK;
-  } else {
-    gst_buffer_unref (message);
-    ret = GST_FLOW_FLUSHING;
   }
 
   g_mutex_unlock (&self->lock);
