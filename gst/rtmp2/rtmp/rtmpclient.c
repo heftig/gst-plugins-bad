@@ -269,8 +269,8 @@ handshake_done (GObject * source, GAsyncResult * result, gpointer user_data)
   }
 
   data->connection = gst_rtmp_connection_new (socket_connection);
-  data->error_handler_id = g_signal_connect_object (data->connection,
-      "error", G_CALLBACK (connection_error), task, 0);
+  data->error_handler_id = g_signal_connect (data->connection,
+      "error", G_CALLBACK (connection_error), task);
 
   send_connect (task);
 }
