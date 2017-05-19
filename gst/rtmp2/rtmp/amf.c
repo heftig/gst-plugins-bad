@@ -244,7 +244,7 @@ gst_amf_node_free (gpointer ptr)
 
     case GST_AMF_TYPE_OBJECT:
     case GST_AMF_TYPE_ECMA_ARRAY:
-      g_array_free (node->value.v_fields, TRUE);
+      g_array_unref (node->value.v_fields);
       break;
 
     default:
