@@ -493,13 +493,25 @@ buffer_to_message (GstRtmp2Sink * self, GstBuffer * buffer, GstBuffer ** outbuf)
     timestamp = GST_READ_UINT24_BE (info.data + 4);
     timestamp |= (guint32) GST_READ_UINT8 (info.data + 7) << 24;
 
-    /* FIXME: flvmux timestamps roll over after about 49 days */
-    if (timestamp + self->base_ts < self->last_ts) {
+    /* flvmux timestamps roll over after about 49 days */
+    if (timestamp + self->base_ts + G_MAXINT32 < self->last_ts) {
       GST_WARNING_OBJECT (self, "Timestamp regression %" G_GUINT64_FORMAT
           " -> %" G_GUINT64_FORMAT "; assuming overflow", self->last_ts,
           timestamp + self->base_ts);
       self->base_ts += G_MAXUINT32;
       self->base_ts += 1;
+    } else if (timestamp + self->base_ts > self->last_ts + G_MAXINT32) {
+      GST_WARNING_OBJECT (self, "Timestamp jump %" G_GUINT64_FORMAT
+          " -> %" G_GUINT64_FORMAT "; assuming underflow", self->last_ts,
+          timestamp + self->base_ts);
+      if (self->base_ts > 0) {
+        self->base_ts -= G_MAXUINT32;
+        self->base_ts -= 1;
+      } else {
+        GST_WARNING_OBJECT (self, "Cannot regress further;"
+            " forcing timestamp to zero");
+        timestamp = 0;
+      }
     }
     timestamp += self->base_ts;
     self->last_ts = timestamp;
