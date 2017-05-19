@@ -74,6 +74,10 @@ const GstAmfNode * gst_amf_node_get_field_by_index (const GstAmfNode * node,
     guint index);
 guint gst_amf_node_get_num_fields (const GstAmfNode * node);
 
+const GstAmfNode * gst_amf_node_get_element (const GstAmfNode * node,
+    guint index);
+guint gst_amf_node_get_num_elements (const GstAmfNode * node);
+
 void gst_amf_node_set_number (GstAmfNode * node, gdouble value);
 void gst_amf_node_set_boolean (GstAmfNode * node, gboolean value);
 void gst_amf_node_set_string (GstAmfNode * node, const gchar * value);

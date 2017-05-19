@@ -113,6 +113,7 @@ struct _GstAmfNode
     gdouble v_double;
     gchar *v_string;
     GArray *v_fields;
+    GPtrArray *v_elements;
   } value;
 };
 
@@ -132,6 +133,18 @@ append_field (GstAmfNode * node, gchar * name, GstAmfNode * value)
   g_array_append_val (node->value.v_fields, field);
 }
 
+static inline const GstAmfNode *
+get_element (const GstAmfNode * node, guint index)
+{
+  return g_ptr_array_index (node->value.v_elements, index);
+}
+
+static inline void
+append_element (GstAmfNode * node, GstAmfNode * value)
+{
+  g_ptr_array_add (node->value.v_elements, value);
+}
+
 static GstAmfNode *
 node_new (GstAmfType type)
 {
@@ -148,6 +161,11 @@ node_new (GstAmfType type)
       node->value.v_fields =
           g_array_new (FALSE, FALSE, sizeof (AmfObjectField));
       g_array_set_clear_func (node->value.v_fields, amf_object_field_clear);
+      break;
+
+    case GST_AMF_TYPE_STRICT_ARRAY:
+      node->value.v_elements =
+          g_ptr_array_new_with_free_func (gst_amf_node_free);
       break;
 
     default:
@@ -224,6 +242,15 @@ gst_amf_node_copy (const GstAmfNode * node)
       break;
     }
 
+    case GST_AMF_TYPE_STRICT_ARRAY:{
+      guint i, len = gst_amf_node_get_num_elements (node);
+      for (i = 0; i < len; i++) {
+        const GstAmfNode *elem = get_element (node, i);
+        append_element (copy, gst_amf_node_copy (elem));
+      }
+      break;
+    }
+
     default:
       copy->value = node->value;
       break;
@@ -245,6 +272,10 @@ gst_amf_node_free (gpointer ptr)
     case GST_AMF_TYPE_OBJECT:
     case GST_AMF_TYPE_ECMA_ARRAY:
       g_array_unref (node->value.v_fields);
+      break;
+
+    case GST_AMF_TYPE_STRICT_ARRAY:
+      g_ptr_array_unref (node->value.v_elements);
       break;
 
     default:
@@ -323,6 +354,22 @@ gst_amf_node_get_num_fields (const GstAmfNode * node)
   g_return_val_if_fail (type == GST_AMF_TYPE_OBJECT ||
       type == GST_AMF_TYPE_ECMA_ARRAY, 0);
   return node->value.v_fields->len;
+}
+
+const GstAmfNode *
+gst_amf_node_get_element (const GstAmfNode * node, guint index)
+{
+  guint len = gst_amf_node_get_num_elements (node);
+  g_return_val_if_fail (index < len, NULL);
+  return get_element (node, index);
+}
+
+guint
+gst_amf_node_get_num_elements (const GstAmfNode * node)
+{
+  GstAmfType type = gst_amf_node_get_type (node);
+  g_return_val_if_fail (type == GST_AMF_TYPE_STRICT_ARRAY, 0);
+  return node->value.v_elements->len;
 }
 
 void
@@ -461,6 +508,24 @@ dump_node (GString * string, const GstAmfNode * node, gint indent,
         dump_indent (string, indent, recursion_depth);
       }
       g_string_append_c (string, object_delim[1]);
+      break;
+    }
+
+    case GST_AMF_TYPE_STRICT_ARRAY:{
+      guint i, len = gst_amf_node_get_num_elements (node);
+      g_string_append_c (string, '(');
+      if (len) {
+        for (i = 0; i < len; i++) {
+          const GstAmfNode *value = get_element (node, i);
+          dump_indent (string, indent, recursion_depth + 1);
+          dump_node (string, value, indent, recursion_depth + 1);
+          if (i < len - 1) {
+            g_string_append_c (string, ',');
+          }
+        }
+        dump_indent (string, indent, recursion_depth);
+      }
+      g_string_append_c (string, ')');
       break;
     }
 
@@ -640,6 +705,30 @@ parse_ecma_array (AmfParser * parser, GstAmfNode * node)
   }
 }
 
+static void
+parse_strict_array (AmfParser * parser, GstAmfNode * node)
+{
+  GstAmfNode *value = NULL;
+  guint32 n_elements, i;
+
+  if (parser->offset + 4 > parser->size) {
+    GST_ERROR ("array size too long");
+    return;
+  }
+
+  n_elements = parse_u32 (parser);
+
+  for (i = 0; i < n_elements; i++) {
+    value = parse_value (parser);
+    if (!value) {
+      GST_ERROR ("array too long");
+      break;
+    }
+
+    append_element (node, value);
+  }
+}
+
 static GstAmfNode *
 parse_value (AmfParser * parser)
 {
@@ -676,6 +765,9 @@ parse_value (AmfParser * parser)
       break;
     case GST_AMF_TYPE_ECMA_ARRAY:
       parse_ecma_array (parser, node);
+      break;
+    case GST_AMF_TYPE_STRICT_ARRAY:
+      parse_strict_array (parser, node);
       break;
     case GST_AMF_TYPE_NULL:
     case GST_AMF_TYPE_UNDEFINED:
