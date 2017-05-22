@@ -54,10 +54,10 @@ gst_rtmp_location_handler_default_init (GstRtmpLocationHandlerInterface * iface)
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface,
       g_param_spec_string ("application", "Application",
-          "RTMP application name", DEFAULT_APPLICATION,
+          "RTMP application path", DEFAULT_APPLICATION,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_string ("stream",
-          "Stream", "RTMP stream name", DEFAULT_STREAM,
+          "Stream", "RTMP stream path", DEFAULT_STREAM,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_string ("username",
           "User name", "RTMP authorization user name", DEFAULT_USERNAME,
@@ -112,14 +112,50 @@ uri_handler_get_uri (GstURIHandler * handler)
 }
 
 static gboolean
+parse_path (GstUri * uri, gchar ** application, gchar ** stream)
+{
+  GList *segments, *segment;
+  guint nsegments;
+  GstUri *tempuri;
+
+  g_return_val_if_fail (uri, FALSE);
+  g_return_val_if_fail (application, FALSE);
+  g_return_val_if_fail (stream, FALSE);
+
+  segments = gst_uri_get_path_segments (uri);
+  nsegments = g_list_length (segments);
+
+  /* Test if too short, or not absolute */
+  if (nsegments < 3 || segments->data != NULL) {
+    g_list_free_full (segments, g_free);
+    return FALSE;
+  }
+
+  /* Strip root */
+  segments = g_list_delete_link (segments, segments);
+
+  /* Extract stream */
+  segment = g_list_last (segments);
+  *stream = segment->data;
+  segments = g_list_delete_link (segments, segment);
+
+  tempuri = gst_uri_new (NULL, NULL, NULL, GST_URI_NO_PORT, NULL, NULL, NULL);
+  gst_uri_set_path_segments (tempuri, segments);
+  *application = gst_uri_get_path (tempuri);
+  gst_uri_unref (tempuri);
+
+  return TRUE;
+}
+
+static gboolean
 uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     GError ** error)
 {
   GstRtmpLocationHandler *self = GST_RTMP_LOCATION_HANDLER (handler);
   GstUri *uri;
   const gchar *host, *userinfo;
-  guint port, nsegments;
-  GList *segments = NULL;
+  gchar *application, *stream;
+  guint port;
   gboolean ret = FALSE;
 
   GST_DEBUG_OBJECT (self, "setting URI to %s", GST_STR_NULL (string));
@@ -140,11 +176,9 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     goto out;
   }
 
-  segments = gst_uri_get_path_segments (uri);
-  nsegments = g_list_length (segments);
-  if (nsegments != 3 || g_list_nth_data (segments, 0) != NULL) {
+  if (!parse_path (uri, &application, &stream)) {
     g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
-        "URI path doesn't match /app/stream: %s", string);
+        "URI has bad path: %s", string);
     goto out;
   }
 
@@ -153,9 +187,11 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     port = GST_RTMP_DEFAULT_PORT;
   }
 
-  g_object_set (self, "host", host, "port", port,
-      "application", g_list_nth_data (segments, 1),
-      "stream", g_list_nth_data (segments, 2), NULL);
+  g_object_set (self, "host", host, "port", port, "application", application,
+      "stream", stream, NULL);
+
+  g_free (application);
+  g_free (stream);
 
   userinfo = gst_uri_get_userinfo (uri);
   if (userinfo) {
@@ -175,7 +211,6 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   ret = TRUE;
 
 out:
-  g_list_free_full (segments, g_free);
   gst_uri_unref (uri);
   return ret;
 }
