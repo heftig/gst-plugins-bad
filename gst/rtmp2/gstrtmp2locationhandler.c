@@ -135,11 +135,19 @@ parse_path (GstUri * uri, gchar ** application, gchar ** stream)
 
   /* Extract stream */
   {
+    gchar *query = gst_uri_get_query_string (uri);
     GList *segment = g_list_last (segments);
+    gchar *streamname = segment->data;
 
-    *stream = segment->data;
+    if (query && query[0]) {
+      *stream = g_strconcat (streamname, "?", query, NULL);
+      g_free (streamname);
+    } else {
+      *stream = streamname;
+    }
 
     segments = g_list_delete_link (segments, segment);
+    g_free (query);
   }
 
   {
