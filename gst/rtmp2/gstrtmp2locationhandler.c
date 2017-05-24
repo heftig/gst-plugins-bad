@@ -114,9 +114,8 @@ uri_handler_get_uri (GstURIHandler * handler)
 static gboolean
 parse_path (GstUri * uri, gchar ** application, gchar ** stream)
 {
-  GList *segments, *segment;
+  GList *segments;
   guint nsegments;
-  GstUri *tempuri;
 
   g_return_val_if_fail (uri, FALSE);
   g_return_val_if_fail (application, FALSE);
@@ -135,14 +134,23 @@ parse_path (GstUri * uri, gchar ** application, gchar ** stream)
   segments = g_list_delete_link (segments, segments);
 
   /* Extract stream */
-  segment = g_list_last (segments);
-  *stream = segment->data;
-  segments = g_list_delete_link (segments, segment);
+  {
+    GList *segment = g_list_last (segments);
 
-  tempuri = gst_uri_new (NULL, NULL, NULL, GST_URI_NO_PORT, NULL, NULL, NULL);
-  gst_uri_set_path_segments (tempuri, segments);
-  *application = gst_uri_get_path (tempuri);
-  gst_uri_unref (tempuri);
+    *stream = segment->data;
+
+    segments = g_list_delete_link (segments, segment);
+  }
+
+  {
+    GstUri *tempuri =
+        gst_uri_new (NULL, NULL, NULL, GST_URI_NO_PORT, NULL, NULL, NULL);
+
+    gst_uri_set_path_segments (tempuri, segments);
+
+    *application = gst_uri_get_path (tempuri);
+    gst_uri_unref (tempuri);
+  }
 
   return TRUE;
 }
