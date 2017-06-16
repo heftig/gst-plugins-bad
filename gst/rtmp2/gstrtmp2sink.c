@@ -60,6 +60,7 @@ typedef struct
 
   /* properties */
   GstRtmpLocation location;
+  gboolean async_connect;
 
   /* stuff */
   gboolean running, flushing;
@@ -125,6 +126,7 @@ enum
   PROP_PASSWORD,
   PROP_AUTHMOD,
   PROP_TIMEOUT,
+  PROP_ASYNC_CONNECT,
 };
 
 /* pad templates */
@@ -179,6 +181,11 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
   g_object_class_override_property (gobject_class, PROP_AUTHMOD, "authmod");
   g_object_class_override_property (gobject_class, PROP_TIMEOUT, "timeout");
 
+  g_object_class_install_property (gobject_class, PROP_ASYNC_CONNECT,
+      g_param_spec_boolean ("async-connect", "Async connect",
+          "Connect on READY, otherwise on first push", TRUE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
       "debug category for rtmp2sink element");
 }
@@ -186,6 +193,8 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
 static void
 gst_rtmp2_sink_init (GstRtmp2Sink * self)
 {
+  self->async_connect = TRUE;
+
   g_mutex_init (&self->lock);
   g_cond_init (&self->cond);
 
@@ -271,6 +280,11 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
       self->location.timeout = g_value_get_uint (value);
       GST_OBJECT_UNLOCK (self);
       break;
+    case PROP_ASYNC_CONNECT:
+      GST_OBJECT_LOCK (self);
+      self->async_connect = g_value_get_boolean (value);
+      GST_OBJECT_UNLOCK (self);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -335,6 +349,11 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
       g_value_set_uint (value, self->location.timeout);
       GST_OBJECT_UNLOCK (self);
       break;
+    case PROP_ASYNC_CONNECT:
+      GST_OBJECT_LOCK (self);
+      g_value_set_boolean (value, self->async_connect);
+      GST_OBJECT_UNLOCK (self);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -367,8 +386,13 @@ gst_rtmp2_sink_start (GstBaseSink * sink)
 {
   GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
   GCancellable *cancellable = g_cancellable_new ();
+  gboolean async;
 
-  GST_DEBUG_OBJECT (self, "Starting");
+  GST_OBJECT_LOCK (self);
+  async = self->async_connect;
+  GST_OBJECT_UNLOCK (self);
+
+  GST_DEBUG_OBJECT (self, "Starting (%s)", async ? "async" : "delayed");
 
   self->running = TRUE;
   self->connector = g_task_new (self, cancellable, connect_task_done, NULL);
@@ -376,7 +400,9 @@ gst_rtmp2_sink_start (GstBaseSink * sink)
   self->last_ts = 0;
   self->base_ts = 0;
 
-  gst_task_start (self->task);
+  if (async) {
+    gst_task_start (self->task);
+  }
 
   g_object_unref (cancellable);
   return TRUE;
@@ -644,6 +670,12 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   }
 
   g_mutex_lock (&self->lock);
+
+  if (G_UNLIKELY (is_running (self) && self->connector &&
+          gst_task_get_state (self->task) != GST_TASK_STARTED)) {
+    GST_DEBUG_OBJECT (self, "Starting connect");
+    gst_task_start (self->task);
+  }
 
   while (G_UNLIKELY (is_running (self) && !self->connection)) {
     GST_DEBUG_OBJECT (self, "Waiting for connection");
