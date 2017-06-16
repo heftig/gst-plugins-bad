@@ -34,6 +34,10 @@ GST_DEBUG_CATEGORY_STATIC (gst_rtmp_client_debug_category);
 
 static void send_connect_done (const gchar * command_name, GPtrArray * args,
     gpointer user_data);
+static void create_stream_done (const gchar * command_name, GPtrArray * args,
+    gpointer user_data);
+static void on_publish_or_play_status (const gchar * command_name,
+    GPtrArray * args, gpointer user_data);
 
 static void
 init_debug (void)
@@ -43,6 +47,8 @@ init_debug (void)
     GST_DEBUG_CATEGORY_INIT (gst_rtmp_client_debug_category,
         "rtmpclient", 0, "debug category for the rtmp client");
     GST_DEBUG_REGISTER_FUNCPTR (send_connect_done);
+    GST_DEBUG_REGISTER_FUNCPTR (create_stream_done);
+    GST_DEBUG_REGISTER_FUNCPTR (on_publish_or_play_status);
     g_once_init_leave (&done, 1);
   }
 }
@@ -664,4 +670,299 @@ gst_rtmp_client_connect_finish (GAsyncResult * result, GError ** error)
 {
   GTask *task = G_TASK (result);
   return g_task_propagate_pointer (task, error);
+}
+
+static void send_create_stream (GTask * task);
+static void send_publish_or_play (GTask * task);
+
+typedef struct
+{
+  GstRtmpConnection *connection;
+  gulong error_handler_id;
+  gchar *stream;
+  gboolean publish;
+  guint32 id;
+} StreamTaskData;
+
+static StreamTaskData *
+stream_task_data_new (GstRtmpConnection * connection, const gchar * stream,
+    gboolean publish)
+{
+  StreamTaskData *data = g_slice_new0 (StreamTaskData);
+  data->connection = g_object_ref (connection);
+  data->stream = g_strdup (stream);
+  data->publish = publish;
+  return data;
+}
+
+static void
+stream_task_data_free (gpointer ptr)
+{
+  StreamTaskData *data = ptr;
+  g_clear_pointer (&data->stream, g_free);
+  if (data->error_handler_id) {
+    g_signal_handler_disconnect (data->connection, data->error_handler_id);
+  }
+  g_clear_object (&data->connection);
+  g_slice_free (StreamTaskData, data);
+}
+
+static void
+start_stream (GstRtmpConnection * connection, const gchar * stream,
+    gboolean publish, GCancellable * cancellable,
+    GAsyncReadyCallback callback, gpointer user_data)
+{
+  GTask *task;
+  StreamTaskData *data;
+
+  init_debug ();
+
+  task = g_task_new (connection, cancellable, callback, user_data);
+  data = stream_task_data_new (connection, stream, publish);
+  g_task_set_task_data (task, data, stream_task_data_free);
+
+  data->error_handler_id = g_signal_connect (connection,
+      "error", G_CALLBACK (connection_error), task);
+
+  send_create_stream (task);
+}
+
+void
+gst_rtmp_client_start_publish_async (GstRtmpConnection * connection,
+    const gchar * stream, GCancellable * cancellable,
+    GAsyncReadyCallback callback, gpointer user_data)
+{
+  start_stream (connection, stream, TRUE, cancellable, callback, user_data);
+}
+
+void
+gst_rtmp_client_start_play_async (GstRtmpConnection * connection,
+    const gchar * stream, GCancellable * cancellable,
+    GAsyncReadyCallback callback, gpointer user_data)
+{
+  start_stream (connection, stream, FALSE, cancellable, callback, user_data);
+}
+
+static void
+send_create_stream (GTask * task)
+{
+  GstRtmpConnection *connection = g_task_get_source_object (task);
+  StreamTaskData *data = g_task_get_task_data (task);
+  GstAmfNode *command_object, *stream_name;
+
+  command_object = gst_amf_node_new_null ();
+  stream_name = gst_amf_node_new_string (data->stream);
+
+  if (data->publish) {
+    /* Not part of RTMP documentation */
+    GST_DEBUG ("Releasing stream '%s'", data->stream);
+    gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
+        "releaseStream", command_object, stream_name, NULL);
+    gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
+        "FCPublish", command_object, stream_name, NULL);
+  }
+
+  GST_INFO ("Creating stream '%s'", data->stream);
+  gst_rtmp_connection_send_command (connection, create_stream_done, task, 0,
+      "createStream", command_object, NULL);
+
+  gst_amf_node_free (stream_name);
+  gst_amf_node_free (command_object);
+}
+
+static void
+create_stream_done (const gchar * command_name, GPtrArray * args,
+    gpointer user_data)
+{
+  GTask *task = G_TASK (user_data);
+  StreamTaskData *data = g_task_get_task_data (task);
+  GstAmfNode *result;
+
+  if (g_task_return_error_if_cancelled (task)) {
+    g_object_unref (task);
+    return;
+  }
+
+  if (!args || args->len < 2) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "createStream failed; not enough return arguments");
+    g_object_unref (task);
+    return;
+  }
+
+  result = g_ptr_array_index (args, 1);
+  if (gst_amf_node_get_type (result) != GST_AMF_TYPE_NUMBER) {
+    GString *error_dump = g_string_new ("");
+
+    gst_amf_node_dump (result, -1, error_dump);
+
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "createStream failed: %s", error_dump->str);
+    g_object_unref (task);
+
+    g_string_free (error_dump, TRUE);
+    return;
+  }
+
+  data->id = gst_amf_node_get_number (result);
+  GST_INFO ("createStream success, stream_id=%" G_GUINT32_FORMAT, data->id);
+
+  if (data->id == 0) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+        "createStream returned ID 0");
+    g_object_unref (task);
+    return;
+  }
+
+  send_publish_or_play (task);
+}
+
+static void
+send_publish_or_play (GTask * task)
+{
+  GstRtmpConnection *connection = g_task_get_source_object (task);
+  StreamTaskData *data = g_task_get_task_data (task);
+  const gchar *command = data->publish ? "publish" : "play";
+  GstAmfNode *command_object, *stream_name, *argument;
+
+  command_object = gst_amf_node_new_null ();
+  stream_name = gst_amf_node_new_string (data->stream);
+
+  if (data->publish) {
+    /* publishing type (live, record, append) */
+    argument = gst_amf_node_new_string ("live");
+  } else {
+    /* "Start" argument: -2 = live or recording, -1 = only live
+       0 or positive = only recording, seek to X seconds */
+    argument = gst_amf_node_new_number (-2);
+  }
+
+  GST_INFO ("Sending %s for '%s' on stream %" G_GUINT32_FORMAT,
+      command, data->stream, data->id);
+  gst_rtmp_connection_expect_command (connection, on_publish_or_play_status,
+      task, data->id, "onStatus");
+  gst_rtmp_connection_send_command (connection, NULL, NULL, data->id,
+      command, command_object, stream_name, argument, NULL);
+
+  gst_amf_node_free (command_object);
+  gst_amf_node_free (stream_name);
+  gst_amf_node_free (argument);
+}
+
+static void
+on_publish_or_play_status (const gchar * command_name, GPtrArray * args,
+    gpointer user_data)
+{
+  GTask *task = G_TASK (user_data);
+  GstRtmpConnection *connection = g_task_get_source_object (task);
+  StreamTaskData *data = g_task_get_task_data (task);
+  const gchar *command = data->publish ? "publish" : "play", *code = NULL;
+  GString *info_dump;
+
+  if (g_task_return_error_if_cancelled (task)) {
+    g_object_unref (task);
+    return;
+  }
+
+  if (!args || args->len < 2) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "%s failed; not enough return arguments", command);
+    g_object_unref (task);
+    return;
+  }
+
+  {
+    const GstAmfNode *info_object, *code_object;
+    info_object = g_ptr_array_index (args, 1);
+    code_object = gst_amf_node_get_field (info_object, "code");
+
+    if (code_object) {
+      code = gst_amf_node_peek_string (code_object);
+    }
+
+    info_dump = g_string_new ("");
+    gst_amf_node_dump (info_object, -1, info_dump);
+  }
+
+  if (data->publish) {
+    if (g_strcmp0 (code, "NetStream.Publish.Start") == 0) {
+      GST_INFO ("publish success: %s", info_dump->str);
+      g_task_return_boolean (task, TRUE);
+      goto out;
+    }
+
+    if (g_strcmp0 (code, "NetStream.Publish.BadName") == 0) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_EXISTS,
+          "publish denied: stream already exists: %s", info_dump->str);
+      goto out;
+    }
+
+    if (g_strcmp0 (code, "NetStream.Publish.Denied") == 0) {
+      g_task_return_new_error (task, G_IO_ERROR,
+          G_IO_ERROR_PERMISSION_DENIED, "publish denied: %s", info_dump->str);
+      goto out;
+    }
+  } else {
+    if (g_strcmp0 (code, "NetStream.Play.Start") == 0 ||
+        g_strcmp0 (code, "NetStream.Play.Reset") == 0) {
+      GST_INFO ("play success: %s", info_dump->str);
+      g_task_return_boolean (task, TRUE);
+      goto out;
+    }
+
+    if (g_strcmp0 (code, "NetStream.Play.StreamNotFound") == 0) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+          "play denied: stream not found: %s", info_dump->str);
+      goto out;
+    }
+  }
+
+  g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+      "unhandled %s result: %s", command, info_dump->str);
+
+out:
+  g_string_free (info_dump, TRUE);
+
+  g_signal_handler_disconnect (connection, data->error_handler_id);
+  data->error_handler_id = 0;
+
+  g_object_unref (task);
+}
+
+static gboolean
+start_stream_finish (GstRtmpConnection * connection,
+    GAsyncResult * result, guint32 * stream_id, GError ** error)
+{
+  GTask *task;
+  StreamTaskData *data;
+
+  g_return_val_if_fail (g_task_is_valid (result, connection), FALSE);
+
+  task = G_TASK (result);
+
+  if (!g_task_propagate_boolean (G_TASK (result), error)) {
+    return FALSE;
+  }
+
+  data = g_task_get_task_data (task);
+
+  if (stream_id) {
+    *stream_id = data->id;
+  }
+
+  return TRUE;
+}
+
+gboolean
+gst_rtmp_client_start_publish_finish (GstRtmpConnection * connection,
+    GAsyncResult * result, guint32 * stream_id, GError ** error)
+{
+  return start_stream_finish (connection, result, stream_id, error);
+}
+
+gboolean
+gst_rtmp_client_start_play_finish (GstRtmpConnection * connection,
+    GAsyncResult * result, guint32 * stream_id, GError ** error)
+{
+  return start_stream_finish (connection, result, stream_id, error);
 }

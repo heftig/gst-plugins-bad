@@ -1,5 +1,4 @@
 /* GStreamer RTMP Library
- * Copyright (C) 2013 David Schleef <ds@schleef.org>
  * Copyright (C) 2017 Make.TV, Inc. <info@make.tv>
  *
  * This library is free software; you can redistribute it and/or
@@ -60,6 +59,18 @@ void gst_rtmp_client_connect_async (const GstRtmpLocation * location,
     gpointer user_data);
 GstRtmpConnection *gst_rtmp_client_connect_finish (GAsyncResult * result,
     GError ** error);
+
+void gst_rtmp_client_start_publish_async (GstRtmpConnection * connection,
+    const gchar * stream, GCancellable * cancellable,
+    GAsyncReadyCallback callback, gpointer user_data);
+gboolean gst_rtmp_client_start_publish_finish (GstRtmpConnection * connection,
+    GAsyncResult * result, guint * stream_id, GError ** error);
+
+void gst_rtmp_client_start_play_async (GstRtmpConnection * connection,
+    const gchar * stream, GCancellable * cancellable,
+    GAsyncReadyCallback callback, gpointer user_data);
+gboolean gst_rtmp_client_start_play_finish (GstRtmpConnection * connection,
+    GAsyncResult * result, guint * stream_id, GError ** error);
 
 G_END_DECLS
 #endif
