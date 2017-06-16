@@ -106,27 +106,27 @@ typedef struct
   gchar *auth_query;
   GstRtmpConnection *connection;
   gulong error_handler_id;
-} TaskData;
+} ConnectTaskData;
 
-static TaskData *
-task_data_new (const GstRtmpLocation * location)
+static ConnectTaskData *
+connect_task_data_new (const GstRtmpLocation * location)
 {
-  TaskData *data = g_slice_new0 (TaskData);
+  ConnectTaskData *data = g_slice_new0 (ConnectTaskData);
   gst_rtmp_location_copy (&data->location, location);
   return data;
 }
 
 static void
-task_data_free (gpointer ptr)
+connect_task_data_free (gpointer ptr)
 {
-  TaskData *data = ptr;
+  ConnectTaskData *data = ptr;
   gst_rtmp_location_clear (&data->location);
   g_clear_pointer (&data->auth_query, g_free);
   if (data->error_handler_id) {
     g_signal_handler_disconnect (data->connection, data->error_handler_id);
   }
   g_clear_object (&data->connection);
-  g_slice_free (TaskData, data);
+  g_slice_free (ConnectTaskData, data);
 }
 
 static GRegex *auth_regex = NULL;
@@ -179,7 +179,8 @@ gst_rtmp_client_connect_async (const GstRtmpLocation * location,
 
   task = g_task_new (NULL, cancellable, callback, user_data);
 
-  g_task_set_task_data (task, task_data_new (location), task_data_free);
+  g_task_set_task_data (task, connect_task_data_new (location),
+      connect_task_data_free);
 
   socket_connect (task);
 }
@@ -187,7 +188,7 @@ gst_rtmp_client_connect_async (const GstRtmpLocation * location,
 static void
 socket_connect (GTask * task)
 {
-  TaskData *data = g_task_get_task_data (task);
+  ConnectTaskData *data = g_task_get_task_data (task);
   GSocketConnectable *addr;
   GSocketClient *socket_client;
 
@@ -256,7 +257,7 @@ handshake_done (GObject * source, GAsyncResult * result, gpointer user_data)
   GIOStream *stream = G_IO_STREAM (source);
   GSocketConnection *socket_connection = G_SOCKET_CONNECTION (stream);
   GTask *task = user_data;
-  TaskData *data = g_task_get_task_data (task);
+  ConnectTaskData *data = g_task_get_task_data (task);
   GError *error = NULL;
   gboolean res;
 
@@ -343,7 +344,7 @@ do_adobe_auth (const gchar * username, const gchar * password,
 static void
 send_connect (GTask * task)
 {
-  TaskData *data = g_task_get_task_data (task);
+  ConnectTaskData *data = g_task_get_task_data (task);
   GstAmfNode *node;
   const gchar *app;
   gchar *uri, *appstr = NULL, *uristr = NULL;
@@ -383,7 +384,7 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
     gpointer user_data)
 {
   GTask *task = G_TASK (user_data);
-  TaskData *data = g_task_get_task_data (task);
+  ConnectTaskData *data = g_task_get_task_data (task);
   const GstAmfNode *node, *optional_args;
   const gchar *code;
 
@@ -615,7 +616,7 @@ static void
 send_secure_token_response (GTask * task, GstRtmpConnection * connection,
     const gchar * challenge)
 {
-  TaskData *data = g_task_get_task_data (task);
+  ConnectTaskData *data = g_task_get_task_data (task);
   if (challenge) {
     GstAmfNode *node1;
     GstAmfNode *node2;
