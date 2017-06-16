@@ -265,16 +265,10 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_AUTHMOD:
-    {
-      GstRtmpAuthmod mode = g_value_get_enum (value);
       GST_OBJECT_LOCK (self);
-      if (self->location.authmod != mode) {
-        self->location.authmod = mode;
-        GST_INFO_OBJECT (self, "successfully set auth method to (%i)", mode);
-      }
+      self->location.authmod = g_value_get_enum (value);
       GST_OBJECT_UNLOCK (self);
       break;
-    }
     case PROP_TIMEOUT:
       GST_OBJECT_LOCK (self);
       self->location.timeout = g_value_get_uint (value);
@@ -392,7 +386,7 @@ gst_rtmp2_sink_start (GstBaseSink * sink)
   async = self->async_connect;
   GST_OBJECT_UNLOCK (self);
 
-  GST_DEBUG_OBJECT (self, "Starting (%s)", async ? "async" : "delayed");
+  GST_INFO_OBJECT (self, "Starting (%s)", async ? "async" : "delayed");
 
   self->running = TRUE;
   self->connector = g_task_new (self, cancellable, connect_task_done, NULL);
@@ -758,7 +752,7 @@ gst_rtmp2_sink_task_func (gpointer user_data)
   GMainContext *context;
   GMainLoop *loop;
 
-  GST_DEBUG ("gst_rtmp2_sink_task starting");
+  GST_DEBUG_OBJECT (self, "gst_rtmp2_sink_task starting");
 
   g_mutex_lock (&self->lock);
   context = self->context = g_main_context_new ();
@@ -780,7 +774,7 @@ gst_rtmp2_sink_task_func (gpointer user_data)
   g_mutex_unlock (&self->lock);
 
   while (g_main_context_pending (context)) {
-    GST_DEBUG ("iterating main context to clean up");
+    GST_DEBUG_OBJECT (self, "iterating main context to clean up");
     g_main_context_iteration (context, FALSE);
   }
 
@@ -791,7 +785,7 @@ gst_rtmp2_sink_task_func (gpointer user_data)
   g_ptr_array_set_size (self->headers, 0);
   g_mutex_unlock (&self->lock);
 
-  GST_DEBUG ("gst_rtmp2_sink_task exiting");
+  GST_DEBUG_OBJECT (self, "gst_rtmp2_sink_task exiting");
 }
 
 static void
