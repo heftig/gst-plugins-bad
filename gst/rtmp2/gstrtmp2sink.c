@@ -42,7 +42,6 @@
 #include "gstrtmp2locationhandler.h"
 #include "rtmp/rtmpclient.h"
 #include "rtmp/rtmpmessage.h"
-#include "rtmp/rtmputils.h"
 
 #include <gst/gst.h>
 #include <gst/base/gstbasesink.h>
@@ -53,13 +52,9 @@ GST_DEBUG_CATEGORY_STATIC (gst_rtmp2_sink_debug_category);
 
 /* prototypes */
 #define GST_RTMP2_SINK(obj)   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_RTMP2_SINK,GstRtmp2Sink))
-#define GST_RTMP2_SINK_CLASS(klass)   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_RTMP2_SINK,GstRtmp2SinkClass))
 #define GST_IS_RTMP2_SINK(obj)   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_RTMP2_SINK))
-#define GST_IS_RTMP2_SINK_CLASS(obj)   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_RTMP2_SINK)
-typedef struct _GstRtmp2Sink GstRtmp2Sink;
-typedef struct _GstRtmp2SinkClass GstRtmp2SinkClass;
 
-struct _GstRtmp2Sink
+typedef struct
 {
   GstBaseSink parent_instance;
 
@@ -67,26 +62,28 @@ struct _GstRtmp2Sink
   GstRtmpLocation location;
 
   /* stuff */
+  gboolean running, flushing;
   GMutex lock;
   GCond cond;
-  gboolean running, flushing;
+
   GstTask *task;
   GRecMutex task_lock;
-  GMainLoop *task_main_loop;
-  GMainContext *task_main_context;
-  GPtrArray *headers;
 
-  /* timestamp fixup */
-  guint64 last_ts, base_ts;
+  GMainLoop *loop;
+  GMainContext *context;
 
-  GTask *connect_task;
+  GTask *connector;
   GstRtmpConnection *connection;
-};
+  guint32 stream_id;
 
-struct _GstRtmp2SinkClass
+  GPtrArray *headers;
+  guint64 last_ts, base_ts;     /* timestamp fixup */
+} GstRtmp2Sink;
+
+typedef struct
 {
   GstBaseSinkClass parent_class;
-};
+} GstRtmp2SinkClass;
 
 /* GObject virtual functions */
 static void gst_rtmp2_sink_set_property (GObject * object,
@@ -106,19 +103,14 @@ static GstFlowReturn gst_rtmp2_sink_render (GstBaseSink * sink,
 static gboolean gst_rtmp2_sink_set_caps (GstBaseSink * sink, GstCaps * caps);
 
 /* Internal API */
-static void gst_rtmp2_sink_task (gpointer user_data);
+static void gst_rtmp2_sink_task_func (gpointer user_data);
+
 static void client_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
-static void send_create_stream (GTask * task);
-static void create_stream_done (const gchar * command_name, GPtrArray * args,
+static void start_publish_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
-static void send_publish (GTask * task);
-static void publish_done (const gchar * command_name, GPtrArray * args,
-    gpointer user_data);
-static void new_connect (GstRtmp2Sink * rtmp2sink);
 static void connect_task_done (GObject * object, GAsyncResult * result,
     gpointer user_data);
-
 
 enum
 {
@@ -134,8 +126,6 @@ enum
   PROP_AUTHMOD,
   PROP_TIMEOUT,
 };
-
-#define DEFAULT_PUBLISHING_TYPE "live"
 
 /* pad templates */
 
@@ -159,14 +149,12 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstBaseSinkClass *base_sink_class = GST_BASE_SINK_CLASS (klass);
 
-  /* Setting up pads and setting metadata should be moved to
-     base_class_init if you intend to subclass this class. */
-  gst_element_class_add_pad_template (GST_ELEMENT_CLASS (klass),
-      gst_static_pad_template_get (&gst_rtmp2_sink_sink_template));
+  gst_element_class_add_static_pad_template (GST_ELEMENT_CLASS (klass),
+      &gst_rtmp2_sink_sink_template);
 
   gst_element_class_set_static_metadata (GST_ELEMENT_CLASS (klass),
       "RTMP sink element", "Sink", "Sink element for RTMP streams",
-      "David Schleef <ds@schleef.org>");
+      "Make.TV, Inc. <info@make.tv>");
 
   gobject_class->set_property = gst_rtmp2_sink_set_property;
   gobject_class->get_property = gst_rtmp2_sink_get_property;
@@ -196,15 +184,17 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
 }
 
 static void
-gst_rtmp2_sink_init (GstRtmp2Sink * rtmp2sink)
+gst_rtmp2_sink_init (GstRtmp2Sink * self)
 {
-  g_mutex_init (&rtmp2sink->lock);
-  g_cond_init (&rtmp2sink->cond);
-  rtmp2sink->task = gst_task_new (gst_rtmp2_sink_task, rtmp2sink, NULL);
-  g_rec_mutex_init (&rtmp2sink->task_lock);
-  gst_task_set_lock (rtmp2sink->task, &rtmp2sink->task_lock);
-  rtmp2sink->headers =
-      g_ptr_array_new_with_free_func ((GDestroyNotify) gst_mini_object_unref);
+  g_mutex_init (&self->lock);
+  g_cond_init (&self->cond);
+
+  self->task = gst_task_new (gst_rtmp2_sink_task_func, self, NULL);
+  g_rec_mutex_init (&self->task_lock);
+  gst_task_set_lock (self->task, &self->task_lock);
+
+  self->headers = g_ptr_array_new_with_free_func
+      ((GDestroyNotify) gst_mini_object_unref);
 }
 
 static void
@@ -213,7 +203,7 @@ gst_rtmp2_sink_uri_handler_init (GstURIHandlerInterface * iface)
   gst_rtmp_location_handler_implement_uri_handler (iface, GST_URI_SINK);
 }
 
-void
+static void
 gst_rtmp2_sink_set_property (GObject * object, guint property_id,
     const GValue * value, GParamSpec * pspec)
 {
@@ -287,7 +277,7 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
   }
 }
 
-void
+static void
 gst_rtmp2_sink_get_property (GObject * object, guint property_id,
     GValue * value, GParamSpec * pspec)
 {
@@ -351,88 +341,100 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
   }
 }
 
-void
+static void
 gst_rtmp2_sink_finalize (GObject * object)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (object);
+  GstRtmp2Sink *self = GST_RTMP2_SINK (object);
 
-  /* clean up object here */
-  g_clear_object (&rtmp2sink->connect_task);
-  g_clear_object (&rtmp2sink->connection);
-  g_clear_pointer (&rtmp2sink->headers, g_ptr_array_unref);
-  gst_rtmp_location_clear (&rtmp2sink->location);
-  g_clear_object (&rtmp2sink->task);
-  g_rec_mutex_clear (&rtmp2sink->task_lock);
-  g_mutex_clear (&rtmp2sink->lock);
-  g_cond_clear (&rtmp2sink->cond);
+  g_clear_pointer (&self->headers, g_ptr_array_unref);
+
+  g_clear_object (&self->connector);
+  g_clear_object (&self->connection);
+
+  g_clear_object (&self->task);
+  g_rec_mutex_clear (&self->task_lock);
+
+  g_mutex_clear (&self->lock);
+  g_cond_clear (&self->cond);
+
+  gst_rtmp_location_clear (&self->location);
 
   G_OBJECT_CLASS (gst_rtmp2_sink_parent_class)->finalize (object);
 }
 
-/* start and stop processing, ideal for opening/closing the resource */
 static gboolean
 gst_rtmp2_sink_start (GstBaseSink * sink)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
+  GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
+  GCancellable *cancellable = g_cancellable_new ();
 
-  GST_DEBUG_OBJECT (rtmp2sink, "start");
+  GST_DEBUG_OBJECT (self, "Starting");
 
-  rtmp2sink->running = TRUE;
-  rtmp2sink->last_ts = 0;
-  rtmp2sink->base_ts = 0;
-  gst_task_start (rtmp2sink->task);
+  self->running = TRUE;
+  self->connector = g_task_new (self, cancellable, connect_task_done, NULL);
+  self->stream_id = 0;
+  self->last_ts = 0;
+  self->base_ts = 0;
 
+  gst_task_start (self->task);
+
+  g_object_unref (cancellable);
   return TRUE;
 }
 
 static gboolean
-stop_main_loop (gpointer user_data)
+quit_invoker (gpointer user_data)
 {
   g_main_loop_quit (user_data);
   return G_SOURCE_REMOVE;
 }
 
+static void
+stop_task (GstRtmp2Sink * self)
+{
+  gst_task_stop (self->task);
+  self->running = FALSE;
+
+  if (self->connector) {
+    GST_DEBUG_OBJECT (self, "Cancelling connector");
+    g_cancellable_cancel (g_task_get_cancellable (self->connector));
+  }
+
+  if (self->loop) {
+    GST_DEBUG_OBJECT (self, "Stopping loop");
+    g_main_context_invoke (self->context, quit_invoker, self->loop);
+  }
+
+  g_cond_broadcast (&self->cond);
+}
+
 static gboolean
 gst_rtmp2_sink_stop (GstBaseSink * sink)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
+  GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
 
-  GST_DEBUG_OBJECT (rtmp2sink, "stop");
+  GST_DEBUG_OBJECT (self, "stop");
 
-  g_mutex_lock (&rtmp2sink->lock);
+  g_mutex_lock (&self->lock);
+  stop_task (self);
+  g_mutex_unlock (&self->lock);
 
-  gst_task_stop (rtmp2sink->task);
-  rtmp2sink->running = FALSE;
-
-  if (rtmp2sink->connect_task) {
-    g_cancellable_cancel (g_task_get_cancellable (rtmp2sink->connect_task));
-  }
-  if (rtmp2sink->task_main_loop) {
-    g_main_context_invoke (rtmp2sink->task_main_context, stop_main_loop,
-        rtmp2sink->task_main_loop);
-  }
-
-  g_cond_broadcast (&rtmp2sink->cond);
-  g_mutex_unlock (&rtmp2sink->lock);
-
-  gst_task_join (rtmp2sink->task);
+  gst_task_join (self->task);
 
   return TRUE;
 }
 
-/* unlock any pending access to the resource. subclasses should unlock
- * any function ASAP. */
 static gboolean
 gst_rtmp2_sink_unlock (GstBaseSink * sink)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
+  GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
 
-  GST_DEBUG_OBJECT (rtmp2sink, "unlock");
+  GST_DEBUG_OBJECT (self, "unlock");
 
-  g_mutex_lock (&rtmp2sink->lock);
-  rtmp2sink->flushing = TRUE;
-  g_cond_broadcast (&rtmp2sink->cond);
-  g_mutex_unlock (&rtmp2sink->lock);
+  g_mutex_lock (&self->lock);
+  self->flushing = TRUE;
+  g_cond_broadcast (&self->cond);
+  g_mutex_unlock (&self->lock);
 
   return TRUE;
 }
@@ -440,13 +442,13 @@ gst_rtmp2_sink_unlock (GstBaseSink * sink)
 static gboolean
 gst_rtmp2_sink_unlock_stop (GstBaseSink * sink)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (sink);
+  GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
 
-  GST_DEBUG_OBJECT (rtmp2sink, "unlock_stop");
+  GST_DEBUG_OBJECT (self, "unlock_stop");
 
-  g_mutex_lock (&rtmp2sink->lock);
-  rtmp2sink->flushing = FALSE;
-  g_mutex_unlock (&rtmp2sink->lock);
+  g_mutex_lock (&self->lock);
+  self->flushing = FALSE;
+  g_mutex_unlock (&self->lock);
 
   return TRUE;
 }
@@ -537,7 +539,8 @@ buffer_to_message (GstRtmp2Sink * self, GstBuffer * buffer, GstBuffer ** outbuf)
       return FALSE;
   }
 
-  message = gst_rtmp_message_new (type, cstream, 1);
+  /* May not know stream ID yet; set later */
+  message = gst_rtmp_message_new (type, cstream, 0);
   message = gst_buffer_append_region (message, gst_buffer_ref (buffer),
       payload_offset, payload_size);
 
@@ -580,6 +583,15 @@ should_drop_header (GstRtmp2Sink * self, GstBuffer * buffer)
 }
 
 static void
+send_message (GstRtmp2Sink * self, GstBuffer * message)
+{
+  GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (message);
+  g_return_if_fail (self->stream_id != 0);
+  meta->mstream = self->stream_id;
+  gst_rtmp_connection_queue_message (self->connection, message);
+}
+
+static void
 send_streamheader (GstRtmp2Sink * self)
 {
   guint i;
@@ -591,8 +603,7 @@ send_streamheader (GstRtmp2Sink * self)
   GST_DEBUG_OBJECT (self, "Sending %u streamheader chunks", self->headers->len);
 
   for (i = 0; i < self->headers->len; i++) {
-    gst_rtmp_connection_queue_message (self->connection,
-        g_ptr_array_index (self->headers, i));
+    send_message (self, g_ptr_array_index (self->headers, i));
   }
 
   /* Steal pointers: suppress free */
@@ -602,39 +613,10 @@ send_streamheader (GstRtmp2Sink * self)
       (GDestroyNotify) gst_mini_object_unref);
 }
 
-static GstFlowReturn
-send_message (GstRtmp2Sink * self, GstBuffer * message)
+static inline gboolean
+is_running (GstRtmp2Sink * self)
 {
-  GstFlowReturn ret;
-
-  g_mutex_lock (&self->lock);
-
-  while (G_UNLIKELY (!self->flushing && !self->connection &&
-          self->connect_task)) {
-    GST_DEBUG_OBJECT (self, "waiting for connection");
-    g_cond_wait (&self->cond, &self->lock);
-  }
-
-  while (G_UNLIKELY (!self->flushing && self->connection &&
-          gst_rtmp_connection_get_num_queued (self->connection) > 3)) {
-    GST_LOG_OBJECT (self, "waiting for queue");
-    g_cond_wait (&self->cond, &self->lock);
-  }
-
-  if (G_UNLIKELY (self->flushing)) {
-    gst_buffer_unref (message);
-    ret = GST_FLOW_FLUSHING;
-  } else if (G_UNLIKELY (!self->connection)) {
-    gst_buffer_unref (message);
-    ret = GST_FLOW_ERROR;
-  } else {
-    send_streamheader (self);
-    gst_rtmp_connection_queue_message (self->connection, message);
-    ret = GST_FLOW_OK;
-  }
-
-  g_mutex_unlock (&self->lock);
-  return ret;
+  return G_LIKELY (self->running && !self->flushing);
 }
 
 static GstFlowReturn
@@ -642,6 +624,7 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
 {
   GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
   GstBuffer *message;
+  GstFlowReturn ret;
 
   if (G_UNLIKELY (should_drop_header (self, buffer))) {
     GST_DEBUG_OBJECT (self, "Skipping header %" GST_PTR_FORMAT, buffer);
@@ -660,7 +643,33 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
     return GST_FLOW_OK;
   }
 
-  return send_message (self, message);
+  g_mutex_lock (&self->lock);
+
+  while (G_UNLIKELY (is_running (self) && !self->connection)) {
+    GST_DEBUG_OBJECT (self, "Waiting for connection");
+    g_cond_wait (&self->cond, &self->lock);
+  }
+
+  while (G_UNLIKELY (is_running (self) && self->connection &&
+          gst_rtmp_connection_get_num_queued (self->connection) > 3)) {
+    GST_LOG_OBJECT (self, "Waiting for queue");
+    g_cond_wait (&self->cond, &self->lock);
+  }
+
+  if (G_UNLIKELY (!is_running (self))) {
+    gst_buffer_unref (message);
+    ret = GST_FLOW_FLUSHING;
+  } else if (G_UNLIKELY (!self->connection)) {
+    gst_buffer_unref (message);
+    ret = GST_FLOW_ERROR;
+  } else {
+    send_streamheader (self);
+    send_message (self, message);
+    ret = GST_FLOW_OK;
+  }
+
+  g_mutex_unlock (&self->lock);
+  return ret;
 }
 
 static const GArray *
@@ -711,124 +720,46 @@ gst_rtmp2_sink_set_caps (GstBaseSink * sink, GstCaps * caps)
 
 /* Mainloop task */
 static void
-gst_rtmp2_sink_task (gpointer user_data)
+gst_rtmp2_sink_task_func (gpointer user_data)
 {
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (user_data);
-  GMainContext *main_context;
-  GMainLoop *main_loop;
+  GstRtmp2Sink *self = GST_RTMP2_SINK (user_data);
+  GMainContext *context;
+  GMainLoop *loop;
 
   GST_DEBUG ("gst_rtmp2_sink_task starting");
 
-  g_mutex_lock (&rtmp2sink->lock);
-  main_context = rtmp2sink->task_main_context = g_main_context_new ();
-  g_main_context_push_thread_default (main_context);
-  main_loop = rtmp2sink->task_main_loop = g_main_loop_new (main_context, TRUE);
-  new_connect (rtmp2sink);
-  g_mutex_unlock (&rtmp2sink->lock);
+  g_mutex_lock (&self->lock);
+  context = self->context = g_main_context_new ();
+  g_main_context_push_thread_default (context);
+  loop = self->loop = g_main_loop_new (context, TRUE);
+  GST_OBJECT_LOCK (self);
+  gst_rtmp_client_connect_async (&self->location,
+      g_task_get_cancellable (self->connector), client_connect_done,
+      self->connector);
+  GST_OBJECT_UNLOCK (self);
+  g_mutex_unlock (&self->lock);
 
-  g_main_loop_run (main_loop);
+  g_main_loop_run (loop);
 
-  g_mutex_lock (&rtmp2sink->lock);
-  g_clear_pointer (&rtmp2sink->task_main_loop, g_main_loop_unref);
-  g_clear_pointer (&rtmp2sink->connection, gst_rtmp_connection_close_and_unref);
-  g_cond_broadcast (&rtmp2sink->cond);
-  g_mutex_unlock (&rtmp2sink->lock);
+  g_mutex_lock (&self->lock);
+  g_clear_pointer (&self->loop, g_main_loop_unref);
+  g_clear_pointer (&self->connection, gst_rtmp_connection_close_and_unref);
+  g_cond_broadcast (&self->cond);
+  g_mutex_unlock (&self->lock);
 
-  while (g_main_context_pending (main_context)) {
+  while (g_main_context_pending (context)) {
     GST_DEBUG ("iterating main context to clean up");
-    g_main_context_iteration (main_context, FALSE);
+    g_main_context_iteration (context, FALSE);
   }
 
-  g_main_context_pop_thread_default (main_context);
+  g_main_context_pop_thread_default (context);
 
-  g_mutex_lock (&rtmp2sink->lock);
-  g_clear_pointer (&rtmp2sink->task_main_context, g_main_context_unref);
-  g_ptr_array_set_size (rtmp2sink->headers, 0);
-  g_mutex_unlock (&rtmp2sink->lock);
+  g_mutex_lock (&self->lock);
+  g_clear_pointer (&self->context, g_main_context_unref);
+  g_ptr_array_set_size (self->headers, 0);
+  g_mutex_unlock (&self->lock);
 
   GST_DEBUG ("gst_rtmp2_sink_task exiting");
-}
-
-static void
-new_connect (GstRtmp2Sink * rtmp2sink)
-{
-  GCancellable *cancellable = g_cancellable_new ();
-
-  g_warn_if_fail (!rtmp2sink->connect_task);
-  rtmp2sink->connect_task =
-      g_task_new (rtmp2sink, cancellable, connect_task_done, NULL);
-
-  GST_OBJECT_LOCK (rtmp2sink);
-  gst_rtmp_client_connect_async (&rtmp2sink->location,
-      cancellable, client_connect_done, rtmp2sink->connect_task);
-  GST_OBJECT_UNLOCK (rtmp2sink);
-
-  g_object_unref (cancellable);
-}
-
-static void
-put_chunk (GstRtmpConnection * connection, gpointer user_data)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (user_data);
-
-  g_mutex_lock (&rtmp2sink->lock);
-  g_cond_signal (&rtmp2sink->cond);
-  g_mutex_unlock (&rtmp2sink->lock);
-}
-
-static void
-connection_error (GstRtmpConnection * connection, GstRtmp2Sink * rtmp2sink)
-{
-  g_mutex_lock (&rtmp2sink->lock);
-  if (rtmp2sink->connect_task) {
-    g_cancellable_cancel (g_task_get_cancellable (rtmp2sink->connect_task));
-  } else if (rtmp2sink->task_main_loop) {
-    GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, WRITE,
-        ("Connection error"), (NULL));
-    gst_task_stop (rtmp2sink->task);
-    g_main_loop_quit (rtmp2sink->task_main_loop);
-  }
-  g_mutex_unlock (&rtmp2sink->lock);
-}
-
-static void
-connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
-{
-  GstRtmp2Sink *rtmp2sink = GST_RTMP2_SINK (object);
-  GTask *task = G_TASK (result);
-  GError *error = NULL;
-
-  g_mutex_lock (&rtmp2sink->lock);
-
-  g_warn_if_fail (rtmp2sink->connect_task == task);
-  g_warn_if_fail (g_task_is_valid (task, object));
-
-  rtmp2sink->connect_task = NULL;
-  rtmp2sink->connection = g_task_propagate_pointer (task, &error);
-  if (rtmp2sink->connection) {
-    gst_rtmp_connection_set_output_handler (rtmp2sink->connection,
-        put_chunk, g_object_ref (rtmp2sink), g_object_unref);
-    g_signal_connect_object (rtmp2sink->connection, "error",
-        G_CALLBACK (connection_error), rtmp2sink, 0);
-  } else {
-    if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
-      GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, NOT_AUTHORIZED,
-          ("Not authorized to push to server"),
-          ("%s", error ? GST_STR_NULL (error->message) : "(NULL error)"));
-    } else if (g_error_matches (error, G_IO_ERROR,
-            G_IO_ERROR_CONNECTION_REFUSED)) {
-      GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, OPEN_READ,
-          ("Could not connect to server"), ("%s",
-              error ? GST_STR_NULL (error->message) : "(NULL error)"));
-    } else if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-      GST_ELEMENT_ERROR (rtmp2sink, RESOURCE, FAILED,
-          ("Could not connect to server"),
-          ("%s", error ? GST_STR_NULL (error->message) : "(NULL error)"));
-    }
-  }
-
-  g_cond_signal (&rtmp2sink->cond);
-  g_mutex_unlock (&rtmp2sink->lock);
 }
 
 static void
@@ -836,6 +767,7 @@ client_connect_done (GObject * source, GAsyncResult * result,
     gpointer user_data)
 {
   GTask *task = user_data;
+  GstRtmp2Sink *self = g_task_get_source_object (task);
   GError *error = NULL;
   GstRtmpConnection *connection;
 
@@ -853,140 +785,117 @@ client_connect_done (GObject * source, GAsyncResult * result,
     return;
   }
 
-  send_create_stream (task);
+  GST_OBJECT_LOCK (self);
+  gst_rtmp_client_start_publish_async (connection, self->location.stream,
+      g_task_get_cancellable (task), start_publish_done, task);
+  GST_OBJECT_UNLOCK (self);
 }
 
 static void
-send_create_stream (GTask * task)
-{
-  GstRtmpConnection *connection = g_task_get_task_data (task);
-  GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
-  GstAmfNode *node;
-  GstAmfNode *node2;
-
-  node = gst_amf_node_new_null ();
-
-  GST_OBJECT_LOCK (rtmp2sink);
-  node2 = gst_amf_node_new_string (rtmp2sink->location.stream);
-  GST_OBJECT_UNLOCK (rtmp2sink);
-
-  gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
-      "releaseStream", node, node2, NULL);
-  gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
-      "FCPublish", node, node2, NULL);
-  gst_rtmp_connection_send_command (connection, create_stream_done, task, 0,
-      "createStream", node, NULL);
-
-  gst_amf_node_free (node2);
-  gst_amf_node_free (node);
-}
-
-static void
-create_stream_done (const gchar * command_name, GPtrArray * args,
-    gpointer user_data)
+start_publish_done (GObject * source, GAsyncResult * result, gpointer user_data)
 {
   GTask *task = G_TASK (user_data);
-  GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
-
-  if (g_task_return_error_if_cancelled (task)) {
-    g_object_unref (task);
-    return;
-  }
-
-  if (!args || args->len < 2) {
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "createStream failed");
-    g_object_unref (task);
-    return;
-  }
-
-  GST_DEBUG_OBJECT (rtmp2sink, "createStream success, stream_id=%.0f",
-      gst_amf_node_get_number (g_ptr_array_index (args, 1)));
-
-  if (g_task_return_error_if_cancelled (task)) {
-    g_object_unref (task);
-    return;
-  }
-
-  send_publish (task);
-}
-
-static void
-send_publish (GTask * task)
-{
+  GstRtmp2Sink *self = g_task_get_source_object (task);
   GstRtmpConnection *connection = g_task_get_task_data (task);
-  GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
-  GstAmfNode *node;
-  GstAmfNode *node2;
-  GstAmfNode *node3;
-
-  gst_rtmp_connection_expect_command (connection, publish_done, task, 1,
-      "onStatus");
-
-  node = gst_amf_node_new_null ();
-  node2 = gst_amf_node_new_string (rtmp2sink->location.stream);
-  node3 = gst_amf_node_new_string (DEFAULT_PUBLISHING_TYPE);
-  gst_rtmp_connection_send_command (connection, NULL, NULL, 1,
-      "publish", node, node2, node3, NULL);
-  gst_amf_node_free (node);
-  gst_amf_node_free (node2);
-  gst_amf_node_free (node3);
-}
-
-static void
-publish_done (const gchar * command_name, GPtrArray * args, gpointer user_data)
-{
-  GTask *task = G_TASK (user_data);
-  GstRtmpConnection *connection = g_task_get_task_data (task);
-  GstRtmp2Sink *rtmp2sink = g_task_get_source_object (task);
-  GstAmfType optional_args_type = GST_AMF_TYPE_INVALID;
-  GstAmfNode *optional_args;
+  GError *error = NULL;
 
   if (g_task_return_error_if_cancelled (task)) {
     g_object_unref (task);
     return;
   }
 
-  if (!args || args->len < 1) {
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "publish failed");
-    g_object_unref (task);
-    return;
-  }
-
-  if (args->len > 1) {
-    optional_args = g_ptr_array_index (args, 1);
-    optional_args_type = gst_amf_node_get_type (optional_args);
-  }
-
-  switch (optional_args_type) {
-    case GST_AMF_TYPE_OBJECT:{
-      const GstAmfNode *node = gst_amf_node_get_field (optional_args, "code");
-      const gchar *code = node ? gst_amf_node_peek_string (node) : NULL;
-
-      if (g_str_equal (code, "NetStream.Publish.Start")) {
-        GST_DEBUG_OBJECT (rtmp2sink, "publish success, code=%s", code);
-        g_task_return_pointer (task, g_object_ref (connection),
-            gst_rtmp_connection_close_and_unref);
-      } else if (g_str_equal (code, "NetStream.Publish.BadName")) {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_EXISTS,
-            "Stream already exists! (%s)", code);
-      } else if (g_str_equal (code, "NetStream.Publish.Denied")) {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-            "Publish denied! (%s)", code);
-      } else {
-        g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-            "unhandled publish result code: %s", GST_STR_NULL (code));
-      }
-      break;
-    }
-
-    default:
-      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-          "publish failed");
-      break;
+  if (gst_rtmp_client_start_publish_finish (connection, result,
+          &self->stream_id, &error)) {
+    g_task_return_pointer (task, g_object_ref (connection),
+        gst_rtmp_connection_close_and_unref);
+  } else {
+    g_task_return_error (task, error);
   }
 
   g_task_set_task_data (task, NULL, NULL);
   g_object_unref (task);
+}
+
+static void
+put_chunk (GstRtmpConnection * connection, gpointer user_data)
+{
+  GstRtmp2Sink *self = GST_RTMP2_SINK (user_data);
+
+  g_mutex_lock (&self->lock);
+  g_cond_signal (&self->cond);
+  g_mutex_unlock (&self->lock);
+}
+
+static void
+error_callback (GstRtmpConnection * connection, GstRtmp2Sink * self)
+{
+  g_mutex_lock (&self->lock);
+  if (self->connector) {
+    g_cancellable_cancel (g_task_get_cancellable (self->connector));
+  } else if (self->loop) {
+    GST_ELEMENT_ERROR (self, RESOURCE, WRITE, ("Connection error"), (NULL));
+    stop_task (self);
+  }
+  g_mutex_unlock (&self->lock);
+}
+
+static void
+send_connect_error (GstRtmp2Sink * self, GError * error)
+{
+  if (!error) {
+    GST_ERROR_OBJECT (self, "Connect failed with NULL error");
+    GST_ELEMENT_ERROR (self, RESOURCE, FAILED, ("Failed to connect"), (NULL));
+    return;
+  }
+
+  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+    GST_DEBUG_OBJECT (self, "Connection was cancelled (%s)",
+        GST_STR_NULL (error->message));
+    return;
+  }
+
+  GST_ERROR_OBJECT (self, "Failed to connect (%s:%d): %s",
+      g_quark_to_string (error->domain), error->code,
+      GST_STR_NULL (error->message));
+
+  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
+    GST_ELEMENT_ERROR (self, RESOURCE, NOT_AUTHORIZED,
+        ("Not authorized to connect"), ("%s", GST_STR_NULL (error->message)));
+  } else if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CONNECTION_REFUSED)) {
+    GST_ELEMENT_ERROR (self, RESOURCE, OPEN_READ,
+        ("Could not connect"), ("%s", GST_STR_NULL (error->message)));
+  } else {
+    GST_ELEMENT_ERROR (self, RESOURCE, FAILED,
+        ("Failed to connect"),
+        ("error %s:%d: %s", g_quark_to_string (error->domain), error->code,
+            GST_STR_NULL (error->message)));
+  }
+}
+
+static void
+connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
+{
+  GstRtmp2Sink *self = GST_RTMP2_SINK (object);
+  GTask *task = G_TASK (result);
+  GError *error = NULL;
+
+  g_mutex_lock (&self->lock);
+
+  g_warn_if_fail (self->connector == task);
+  g_warn_if_fail (g_task_is_valid (task, object));
+
+  self->connector = NULL;
+  self->connection = g_task_propagate_pointer (task, &error);
+  if (self->connection) {
+    gst_rtmp_connection_set_output_handler (self->connection,
+        put_chunk, g_object_ref (self), g_object_unref);
+    g_signal_connect_object (self->connection, "error",
+        G_CALLBACK (error_callback), self, 0);
+  } else {
+    send_connect_error (self, error);
+    stop_task (self);
+  }
+
+  g_cond_broadcast (&self->cond);
+  g_mutex_unlock (&self->lock);
 }
