@@ -10,6 +10,11 @@
 - Refactor elements and pull out the common connection+mainloop handling code
   into a context object
 
+- Change the location properties into something with less boilerplate?
+
+  Perhaps a GstStructure-based prop, custom GValue transforms or GstValue
+  (de)serializing
+
 - Use glib-mkenums to generate GEnumClasses
 
 - Post-connect onStatus handling (needed for src EOS and async errors?)
