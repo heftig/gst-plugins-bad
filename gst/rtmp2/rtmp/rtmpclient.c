@@ -32,18 +32,20 @@
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_client_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_client_debug_category
 
-static void socket_connect (GTask * task);
-static void socket_connect_done (GObject * source, GAsyncResult * result,
-    gpointer user_data);
-static void handshake_done (GObject * source, GAsyncResult * result,
-    gpointer user_data);
-static void send_connect (GTask * task);
 static void send_connect_done (const gchar * command_name, GPtrArray * args,
     gpointer user_data);
-static void send_secure_token_response (GTask * task,
-    GstRtmpConnection * connection, const gchar * challenge);
-static void connection_error (GstRtmpConnection * connection,
-    gpointer user_data);
+
+static void
+init_debug (void)
+{
+  static volatile gsize done = 0;
+  if (g_once_init_enter (&done)) {
+    GST_DEBUG_CATEGORY_INIT (gst_rtmp_client_debug_category,
+        "rtmpclient", 0, "debug category for the rtmp client");
+    GST_DEBUG_REGISTER_FUNCPTR (send_connect_done);
+    g_once_init_leave (&done, 1);
+  }
+}
 
 void
 gst_rtmp_location_copy (GstRtmpLocation * dest, const GstRtmpLocation * src)
@@ -97,6 +99,17 @@ gst_rtmp_location_get_string (const GstRtmpLocation * uri, gboolean with_stream)
 
   return string;
 }
+
+static void socket_connect (GTask * task);
+static void socket_connect_done (GObject * source, GAsyncResult * result,
+    gpointer user_data);
+static void handshake_done (GObject * source, GAsyncResult * result,
+    gpointer user_data);
+static void send_connect (GTask * task);
+static void send_secure_token_response (GTask * task,
+    GstRtmpConnection * connection, const gchar * challenge);
+static void connection_error (GstRtmpConnection * connection,
+    gpointer user_data);
 
 #define DEFAULT_TIMEOUT 5
 
@@ -165,15 +178,12 @@ gst_rtmp_client_connect_async (const GstRtmpLocation * location,
 {
   GTask *task;
 
+  init_debug ();
+
   if (g_once_init_enter (&auth_regex)) {
     GRegex *re = g_regex_new ("\\[ *AccessManager.Reject *\\] *: *"
         "\\[ *authmod=(?<authmod>.*?) *\\] *: *"
         "(?<query>\\?.*)\\Z", G_REGEX_DOTALL, 0, NULL);
-    g_warn_if_fail (re);
-
-    GST_DEBUG_CATEGORY_INIT (gst_rtmp_client_debug_category,
-        "rtmpclient", 0, "debug category for rtmpclient");
-
     g_once_init_leave (&auth_regex, re);
   }
 
