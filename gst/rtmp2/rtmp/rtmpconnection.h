@@ -29,12 +29,9 @@ G_BEGIN_DECLS
 
 #define GST_TYPE_RTMP_CONNECTION   (gst_rtmp_connection_get_type())
 #define GST_RTMP_CONNECTION(obj)   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_RTMP_CONNECTION,GstRtmpConnection))
-#define GST_RTMP_CONNECTION_CLASS(klass)   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_RTMP_CONNECTION,GstRtmpConnectionClass))
 #define GST_IS_RTMP_CONNECTION(obj)   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_RTMP_CONNECTION))
-#define GST_IS_RTMP_CONNECTION_CLASS(obj)   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_RTMP_CONNECTION))
 
 typedef struct _GstRtmpConnection GstRtmpConnection;
-typedef struct _GstRtmpConnectionClass GstRtmpConnectionClass;
 
 typedef void (*GstRtmpConnectionFunc)
     (GstRtmpConnection * connection, gpointer user_data);
@@ -72,7 +69,6 @@ guint gst_rtmp_connection_send_command (GstRtmpConnection * connection,
 void gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
     GstRtmpCommandCallback response_command, gpointer user_data,
     guint32 stream_id, const gchar * command_name);
-
 
 G_END_DECLS
 

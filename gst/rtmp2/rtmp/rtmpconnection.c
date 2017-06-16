@@ -39,7 +39,7 @@ typedef void (*GstRtmpConnectionCallback) (GstRtmpConnection * connection);
 
 struct _GstRtmpConnection
 {
-  GObject object;
+  GObject parent_instance;
 
   /* should be properties */
   gboolean input_paused;
@@ -79,10 +79,11 @@ struct _GstRtmpConnection
   gsize peer_bandwidth;
 };
 
-struct _GstRtmpConnectionClass
+
+typedef struct
 {
-  GObjectClass object_class;
-};
+  GObjectClass parent_class;
+} GstRtmpConnectionClass;
 
 /* prototypes */
 
