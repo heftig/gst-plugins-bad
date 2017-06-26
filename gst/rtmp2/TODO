@@ -44,6 +44,14 @@
 
 - Server implementation
 
+- Support more protocols
+  - rtmps (TLS tunneling)
+  - rtmpe (App-layer encryption)
+  - rtmpt (HTTP tunneling)
+  - rtmpte (HTTP tunneling + App-layer encryption)
+  - rtmpts (HTTPS tunneling)
+  - rtmfp (UDP)
+
 Needed testing:
 
 - AMF parsing
