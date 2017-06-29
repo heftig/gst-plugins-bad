@@ -117,6 +117,7 @@ enum
 {
   PROP_0,
   PROP_LOCATION,
+  PROP_SCHEME,
   PROP_HOST,
   PROP_PORT,
   PROP_APPLICATION,
@@ -169,6 +170,7 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
   base_sink_class->set_caps = GST_DEBUG_FUNCPTR (gst_rtmp2_sink_set_caps);
 
   g_object_class_override_property (gobject_class, PROP_LOCATION, "location");
+  g_object_class_override_property (gobject_class, PROP_SCHEME, "scheme");
   g_object_class_override_property (gobject_class, PROP_HOST, "host");
   g_object_class_override_property (gobject_class, PROP_PORT, "port");
   g_object_class_override_property (gobject_class, PROP_APPLICATION,
@@ -222,6 +224,11 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
     case PROP_LOCATION:
       gst_rtmp_location_handler_set_uri (GST_RTMP_LOCATION_HANDLER (self),
           g_value_get_string (value));
+      break;
+    case PROP_SCHEME:
+      GST_OBJECT_LOCK (self);
+      self->location.scheme = g_value_get_enum (value);
+      GST_OBJECT_UNLOCK (self);
       break;
     case PROP_HOST:
       GST_OBJECT_LOCK (self);
@@ -296,6 +303,11 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
       GST_OBJECT_LOCK (self);
       g_value_take_string (value, gst_rtmp_location_get_string (&self->location,
               TRUE));
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_SCHEME:
+      GST_OBJECT_LOCK (self);
+      g_value_set_enum (value, self->location.scheme);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_HOST:
