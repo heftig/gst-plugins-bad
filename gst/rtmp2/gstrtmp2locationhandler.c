@@ -191,15 +191,15 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     goto out;
   }
 
+  port = gst_uri_get_port (uri);
+  if (port == GST_URI_NO_PORT) {
+    port = GST_RTMP_DEFAULT_PORT;
+  }
+
   if (!parse_path (uri, &application, &stream)) {
     g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
         "URI has bad path: %s", string);
     goto out;
-  }
-
-  port = gst_uri_get_port (uri);
-  if (port == GST_URI_NO_PORT) {
-    port = GST_RTMP_DEFAULT_PORT;
   }
 
   g_object_set (self, "host", host, "port", port, "application", application,
