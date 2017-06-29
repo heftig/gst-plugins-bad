@@ -54,7 +54,8 @@ gst_rtmp_location_handler_default_init (GstRtmpLocationHandlerInterface * iface)
           "Host", "RTMP server host name", DEFAULT_HOST,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_int ("port", "Port",
-          "RTMP server port", 1, 65535, GST_RTMP_DEFAULT_PORT,
+          "RTMP server port", 1, 65535,
+          gst_rtmp_scheme_get_default_port (DEFAULT_SCHEME),
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface,
       g_param_spec_string ("application", "Application",
@@ -213,7 +214,7 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
 
   port = gst_uri_get_port (uri);
   if (port == GST_URI_NO_PORT) {
-    port = GST_RTMP_DEFAULT_PORT;
+    port = gst_rtmp_scheme_get_default_port (scheme);
   }
 
   if (!parse_path (uri, &application, &stream)) {

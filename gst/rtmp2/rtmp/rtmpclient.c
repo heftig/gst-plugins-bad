@@ -109,6 +109,18 @@ gst_rtmp_scheme_get_strings (void)
   return scheme_strings;
 }
 
+guint
+gst_rtmp_scheme_get_default_port (GstRtmpScheme scheme)
+{
+  switch (scheme) {
+    case GST_RTMP_SCHEME_RTMP:
+      return 1935;
+
+    default:
+      g_return_val_if_reached (0);
+  }
+}
+
 GType
 gst_rtmp_authmod_get_type (void)
 {
@@ -180,7 +192,7 @@ gst_rtmp_location_get_string (const GstRtmpLocation * location,
   g_return_val_if_fail (location, NULL);
 
   scheme_string = gst_rtmp_scheme_to_string (location->scheme);
-  default_port = GST_RTMP_DEFAULT_PORT;
+  default_port = gst_rtmp_scheme_get_default_port (location->scheme);
 
   uri = gst_uri_new (scheme_string, NULL, location->host,
       location->port == default_port ? GST_URI_NO_PORT : location->port, "/",
