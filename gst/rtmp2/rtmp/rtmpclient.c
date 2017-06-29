@@ -53,6 +53,62 @@ init_debug (void)
   }
 }
 
+static const gchar *scheme_strings[] = {
+  "rtmp",
+  NULL
+};
+
+#define NUM_SCHEMES (G_N_ELEMENTS (scheme_strings) - 1)
+
+GType
+gst_rtmp_scheme_get_type (void)
+{
+  static volatile gsize scheme_type = 0;
+  static const GEnumValue scheme[] = {
+    {GST_RTMP_SCHEME_RTMP, "GST_RTMP_SCHEME_RTMP", "rtmp"},
+    {0, NULL, NULL},
+  };
+
+  if (g_once_init_enter (&scheme_type)) {
+    GType tmp = g_enum_register_static ("GstRtmpScheme", scheme);
+    g_once_init_leave (&scheme_type, tmp);
+  }
+
+  return (GType) scheme_type;
+}
+
+GstRtmpScheme
+gst_rtmp_scheme_from_string (const gchar * string)
+{
+  if (string) {
+    gint value;
+
+    for (value = 0; value < NUM_SCHEMES; value++) {
+      if (strcmp (scheme_strings[value], string) == 0) {
+        return value;
+      }
+    }
+  }
+
+  return -1;
+}
+
+const gchar *
+gst_rtmp_scheme_to_string (GstRtmpScheme scheme)
+{
+  if (scheme >= 0 && scheme < NUM_SCHEMES) {
+    return scheme_strings[scheme];
+  }
+
+  return "invalid";
+}
+
+const gchar *const *
+gst_rtmp_scheme_get_strings (void)
+{
+  return scheme_strings;
+}
+
 GType
 gst_rtmp_authmod_get_type (void)
 {

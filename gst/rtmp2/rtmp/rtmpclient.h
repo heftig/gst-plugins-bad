@@ -24,6 +24,21 @@
 
 G_BEGIN_DECLS
 
+#define GST_TYPE_RTMP_SCHEME (gst_rtmp_scheme_get_type ())
+
+typedef enum
+{
+  GST_RTMP_SCHEME_RTMP = 0,
+} GstRtmpScheme;
+
+GType gst_rtmp_scheme_get_type (void);
+
+GstRtmpScheme gst_rtmp_scheme_from_string (const gchar * string);
+const gchar * gst_rtmp_scheme_to_string (GstRtmpScheme scheme);
+const gchar * const * gst_rtmp_scheme_get_strings (void);
+
+
+
 #define GST_TYPE_RTMP_AUTHMOD (gst_rtmp_authmod_get_type ())
 
 typedef enum
