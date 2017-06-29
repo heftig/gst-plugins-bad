@@ -53,6 +53,33 @@ init_debug (void)
   }
 }
 
+GType
+gst_rtmp_authmod_get_type (void)
+{
+  static volatile gsize authmod_type = 0;
+  static const GEnumValue authmod[] = {
+    {GST_RTMP_AUTHMOD_NONE, "GST_RTMP_AUTHMOD_NONE", "none"},
+    {GST_RTMP_AUTHMOD_AUTO, "GST_RTMP_AUTHMOD_AUTO", "auto"},
+    {GST_RTMP_AUTHMOD_ADOBE, "GST_RTMP_AUTHMOD_ADOBE", "adobe"},
+    {0, NULL, NULL},
+  };
+
+  if (g_once_init_enter (&authmod_type)) {
+    GType tmp = g_enum_register_static ("GstRtmpAuthmod", authmod);
+    g_once_init_leave (&authmod_type, tmp);
+  }
+
+  return (GType) authmod_type;
+}
+
+static const gchar *
+gst_rtmp_authmod_get_nick (GstRtmpAuthmod value)
+{
+  GEnumClass *klass = g_type_class_peek (GST_TYPE_RTMP_AUTHMOD);
+  GEnumValue *ev = klass ? g_enum_get_value (klass, value) : NULL;
+  return ev ? ev->value_nick : "(unknown)";
+}
+
 void
 gst_rtmp_location_copy (GstRtmpLocation * dest, const GstRtmpLocation * src)
 {
@@ -155,33 +182,6 @@ connect_task_data_free (gpointer ptr)
 }
 
 static GRegex *auth_regex = NULL;
-
-GType
-gst_rtmp_authmod_get_type (void)
-{
-  static volatile gsize authmod_type = 0;
-  static const GEnumValue authmod[] = {
-    {GST_RTMP_AUTHMOD_NONE, "GST_RTMP_AUTHMOD_NONE", "none"},
-    {GST_RTMP_AUTHMOD_AUTO, "GST_RTMP_AUTHMOD_AUTO", "auto"},
-    {GST_RTMP_AUTHMOD_ADOBE, "GST_RTMP_AUTHMOD_ADOBE", "adobe"},
-    {0, NULL, NULL},
-  };
-
-  if (g_once_init_enter (&authmod_type)) {
-    GType tmp = g_enum_register_static ("GstRtmpAuthmod", authmod);
-    g_once_init_leave (&authmod_type, tmp);
-  }
-
-  return (GType) authmod_type;
-}
-
-static const gchar *
-gst_rtmp_authmod_get_nick (GstRtmpAuthmod value)
-{
-  GEnumClass *klass = g_type_class_peek (GST_TYPE_RTMP_AUTHMOD);
-  GEnumValue *ev = klass ? g_enum_get_value (klass, value) : NULL;
-  return ev ? ev->value_nick : "(unknown)";
-}
 
 void
 gst_rtmp_client_connect_async (const GstRtmpLocation * location,
