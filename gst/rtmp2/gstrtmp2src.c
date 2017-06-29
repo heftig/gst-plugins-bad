@@ -122,6 +122,7 @@ enum
   PROP_PASSWORD,
   PROP_AUTHMOD,
   PROP_TIMEOUT,
+  PROP_TLS_VALIDATION_FLAGS,
   PROP_ASYNC_CONNECT,
 };
 
@@ -176,6 +177,8 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Src, gst_rtmp2_src, GST_TYPE_PUSH_SRC,
   g_object_class_override_property (gobject_class, PROP_PASSWORD, "password");
   g_object_class_override_property (gobject_class, PROP_AUTHMOD, "authmod");
   g_object_class_override_property (gobject_class, PROP_TIMEOUT, "timeout");
+  g_object_class_override_property (gobject_class, PROP_TLS_VALIDATION_FLAGS,
+      "tls-validation-flags");
 
   g_object_class_install_property (gobject_class, PROP_ASYNC_CONNECT,
       g_param_spec_boolean ("async-connect", "Async connect",
@@ -272,6 +275,11 @@ gst_rtmp2_src_set_property (GObject * object, guint property_id,
       self->location.timeout = g_value_get_uint (value);
       GST_OBJECT_UNLOCK (self);
       break;
+    case PROP_TLS_VALIDATION_FLAGS:
+      GST_OBJECT_LOCK (self);
+      self->location.tls_flags = g_value_get_flags (value);
+      GST_OBJECT_UNLOCK (self);
+      break;
     case PROP_ASYNC_CONNECT:
       GST_OBJECT_LOCK (self);
       self->async_connect = g_value_get_boolean (value);
@@ -344,6 +352,11 @@ gst_rtmp2_src_get_property (GObject * object, guint property_id,
     case PROP_TIMEOUT:
       GST_OBJECT_LOCK (self);
       g_value_set_uint (value, self->location.timeout);
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_TLS_VALIDATION_FLAGS:
+      GST_OBJECT_LOCK (self);
+      g_value_set_flags (value, self->location.tls_flags);
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_ASYNC_CONNECT:
