@@ -81,6 +81,11 @@ gst_rtmp_location_handler_default_init (GstRtmpLocationHandlerInterface * iface)
   g_object_interface_install_property (iface, g_param_spec_uint ("timeout",
           "Timeout", "RTMP timeout in seconds", 0, G_MAXUINT, DEFAULT_TIMEOUT,
           G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_interface_install_property (iface,
+      g_param_spec_flags ("tls-validation-flags", "TLS validation flags",
+          "TLS validation flags to use", G_TYPE_TLS_CERTIFICATE_FLAGS,
+          G_TLS_CERTIFICATE_VALIDATE_ALL,
+          G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static GstURIType

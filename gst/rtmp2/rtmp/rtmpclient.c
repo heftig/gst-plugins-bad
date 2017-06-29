@@ -169,6 +169,7 @@ gst_rtmp_location_copy (GstRtmpLocation * dest, const GstRtmpLocation * src)
   dest->secure_token = g_strdup (src->secure_token);
   dest->authmod = src->authmod;
   dest->timeout = src->timeout;
+  dest->tls_flags = src->tls_flags;
 }
 
 void
@@ -308,8 +309,11 @@ socket_connect (GTask * task)
   socket_client = g_socket_client_new ();
 
   if (data->location.scheme == GST_RTMP_SCHEME_RTMPS) {
-    GST_DEBUG ("Configuring TLS");
+    GST_DEBUG ("Configuring TLS, validation flags 0x%02x",
+        data->location.tls_flags);
     g_socket_client_set_tls (socket_client, TRUE);
+    g_socket_client_set_tls_validation_flags (socket_client,
+        data->location.tls_flags);
   }
 
   g_socket_client_set_timeout (socket_client, data->location.timeout);
