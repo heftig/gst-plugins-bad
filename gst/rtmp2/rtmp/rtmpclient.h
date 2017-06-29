@@ -54,6 +54,7 @@ GType gst_rtmp_authmod_get_type (void);
 
 typedef struct _GstRtmpLocation
 {
+  GstRtmpScheme scheme;
   gchar *host;
   guint port;
   gchar *application;

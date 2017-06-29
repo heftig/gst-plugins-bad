@@ -142,6 +142,7 @@ gst_rtmp_location_copy (GstRtmpLocation * dest, const GstRtmpLocation * src)
   g_return_if_fail (dest);
   g_return_if_fail (src);
 
+  dest->scheme = src->scheme;
   dest->host = g_strdup (src->host);
   dest->port = src->port;
   dest->application = g_strdup (src->application);
@@ -173,13 +174,15 @@ gst_rtmp_location_get_string (const GstRtmpLocation * location,
 {
   GstUri *uri;
   gchar *string;
+  const gchar *scheme_string;
   guint default_port;
 
   g_return_val_if_fail (location, NULL);
 
+  scheme_string = gst_rtmp_scheme_to_string (location->scheme);
   default_port = GST_RTMP_DEFAULT_PORT;
 
-  uri = gst_uri_new ("rtmp", NULL, location->host,
+  uri = gst_uri_new (scheme_string, NULL, location->host,
       location->port == default_port ? GST_URI_NO_PORT : location->port, "/",
       NULL, NULL);
 
