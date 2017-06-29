@@ -36,6 +36,7 @@ GType gst_rtmp_scheme_get_type (void);
 GstRtmpScheme gst_rtmp_scheme_from_string (const gchar * string);
 const gchar * gst_rtmp_scheme_to_string (GstRtmpScheme scheme);
 const gchar * const * gst_rtmp_scheme_get_strings (void);
+guint gst_rtmp_scheme_get_default_port (GstRtmpScheme scheme);
 
 
 
