@@ -33,6 +33,10 @@ typedef enum
   GST_RTMP_AUTHMOD_ADOBE,
 } GstRtmpAuthmod;
 
+GType gst_rtmp_authmod_get_type (void);
+
+
+
 typedef struct _GstRtmpLocation
 {
   gchar *host;
@@ -52,14 +56,13 @@ void gst_rtmp_location_clear (GstRtmpLocation * uri);
 gchar *gst_rtmp_location_get_string (const GstRtmpLocation * location,
     gboolean with_stream);
 
-GType gst_rtmp_authmod_get_type (void);
+
 
 void gst_rtmp_client_connect_async (const GstRtmpLocation * location,
     GCancellable * cancellable, GAsyncReadyCallback callback,
     gpointer user_data);
 GstRtmpConnection *gst_rtmp_client_connect_finish (GAsyncResult * result,
     GError ** error);
-
 void gst_rtmp_client_start_publish_async (GstRtmpConnection * connection,
     const gchar * stream, GCancellable * cancellable,
     GAsyncReadyCallback callback, gpointer user_data);
