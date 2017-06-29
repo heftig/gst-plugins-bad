@@ -85,23 +85,29 @@ gst_rtmp_location_clear (GstRtmpLocation * location)
 }
 
 gchar *
-gst_rtmp_location_get_string (const GstRtmpLocation * uri, gboolean with_stream)
+gst_rtmp_location_get_string (const GstRtmpLocation * location,
+    gboolean with_stream)
 {
-  GstUri *gsturi;
+  GstUri *uri;
   gchar *string;
+  guint default_port;
 
-  gsturi = gst_uri_new ("rtmp", NULL, uri->host,
-      uri->port == GST_RTMP_DEFAULT_PORT ? GST_URI_NO_PORT : uri->port, "/",
+  g_return_val_if_fail (location, NULL);
+
+  default_port = GST_RTMP_DEFAULT_PORT;
+
+  uri = gst_uri_new ("rtmp", NULL, location->host,
+      location->port == default_port ? GST_URI_NO_PORT : location->port, "/",
       NULL, NULL);
 
-  gst_uri_append_path_segment (gsturi, uri->application);
+  gst_uri_append_path_segment (uri, location->application);
 
   if (with_stream) {
-    gst_uri_append_path_segment (gsturi, uri->stream);
+    gst_uri_append_path_segment (uri, location->stream);
   }
 
-  string = gst_uri_to_string (gsturi);
-  gst_uri_unref (gsturi);
+  string = gst_uri_to_string (uri);
+  gst_uri_unref (uri);
 
   return string;
 }

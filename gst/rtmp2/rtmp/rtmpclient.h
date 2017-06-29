@@ -49,7 +49,7 @@ typedef struct _GstRtmpLocation
 void gst_rtmp_location_copy (GstRtmpLocation * dest,
     const GstRtmpLocation * src);
 void gst_rtmp_location_clear (GstRtmpLocation * uri);
-gchar *gst_rtmp_location_get_string (const GstRtmpLocation * uri,
+gchar *gst_rtmp_location_get_string (const GstRtmpLocation * location,
     gboolean with_stream);
 
 GType gst_rtmp_authmod_get_type (void);
