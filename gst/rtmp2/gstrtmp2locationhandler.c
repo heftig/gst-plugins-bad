@@ -21,6 +21,7 @@
 #include "rtmp/rtmputils.h"
 #include "rtmp/rtmpclient.h"
 
+#define DEFAULT_SCHEME GST_RTMP_SCHEME_RTMP
 #define DEFAULT_HOST "localhost"
 #define DEFAULT_APPLICATION "live"
 #define DEFAULT_STREAM "myStream"
@@ -45,6 +46,10 @@ gst_rtmp_location_handler_default_init (GstRtmpLocationHandlerInterface * iface)
   g_object_interface_install_property (iface, g_param_spec_string ("location",
           "Location", "Location of RTMP stream to access", DEFAULT_LOCATION,
           G_PARAM_CONSTRUCT | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_interface_install_property (iface, g_param_spec_enum ("scheme",
+          "Scheme", "RTMP connection scheme",
+          GST_TYPE_RTMP_SCHEME, DEFAULT_SCHEME,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_interface_install_property (iface, g_param_spec_string ("host",
           "Host", "RTMP server host name", DEFAULT_HOST,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
@@ -92,8 +97,7 @@ uri_handler_get_type_src (GType type)
 static const gchar *const *
 uri_handler_get_protocols (GType type)
 {
-  static const gchar *protocols[] = { "rtmp", NULL };
-  return protocols;
+  return gst_rtmp_scheme_get_strings ();
 }
 
 static gchar *
@@ -102,8 +106,9 @@ uri_handler_get_uri (GstURIHandler * handler)
   GstRtmpLocation location = { 0, };
   gchar *string;
 
-  g_object_get (handler, "host", &location.host, "port", &location.port,
-      "application", &location.application, "stream", &location.stream, NULL);
+  g_object_get (handler, "scheme", &location.scheme, "host", &location.host,
+      "port", &location.port, "application", &location.application,
+      "stream", &location.stream, NULL);
 
   string = gst_rtmp_location_get_string (&location, TRUE);
   gst_rtmp_location_clear (&location);
@@ -168,7 +173,8 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
 {
   GstRtmpLocationHandler *self = GST_RTMP_LOCATION_HANDLER (handler);
   GstUri *uri;
-  const gchar *host, *userinfo;
+  const gchar *scheme_string, *host, *userinfo;
+  GstRtmpScheme scheme;
   gchar *application, *stream;
   guint port;
   gboolean ret = FALSE;
@@ -183,6 +189,20 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   }
 
   gst_uri_normalize (uri);
+
+  scheme_string = gst_uri_get_scheme (uri);
+  if (!scheme_string) {
+    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+        "URI lacks scheme: %s", string);
+    goto out;
+  }
+
+  scheme = gst_rtmp_scheme_from_string (scheme_string);
+  if (scheme < 0) {
+    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+        "URI has bad scheme '%s': %s", scheme_string, string);
+    goto out;
+  }
 
   host = gst_uri_get_host (uri);
   if (!host) {
@@ -202,8 +222,8 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     goto out;
   }
 
-  g_object_set (self, "host", host, "port", port, "application", application,
-      "stream", stream, NULL);
+  g_object_set (self, "scheme", scheme, "host", host, "port", port,
+      "application", application, "stream", stream, NULL);
 
   g_free (application);
   g_free (stream);
