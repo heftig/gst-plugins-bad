@@ -99,7 +99,7 @@ uri_handler_get_protocols (GType type)
 static gchar *
 uri_handler_get_uri (GstURIHandler * handler)
 {
-  GstRtmpLocation location = { NULL, };
+  GstRtmpLocation location = { 0, };
   gchar *string;
 
   g_object_get (handler, "host", &location.host, "port", &location.port,
