@@ -55,6 +55,7 @@ init_debug (void)
 
 static const gchar *scheme_strings[] = {
   "rtmp",
+  "rtmps",
   NULL
 };
 
@@ -66,6 +67,7 @@ gst_rtmp_scheme_get_type (void)
   static volatile gsize scheme_type = 0;
   static const GEnumValue scheme[] = {
     {GST_RTMP_SCHEME_RTMP, "GST_RTMP_SCHEME_RTMP", "rtmp"},
+    {GST_RTMP_SCHEME_RTMPS, "GST_RTMP_SCHEME_RTMPS", "rtmps"},
     {0, NULL, NULL},
   };
 
@@ -115,6 +117,9 @@ gst_rtmp_scheme_get_default_port (GstRtmpScheme scheme)
   switch (scheme) {
     case GST_RTMP_SCHEME_RTMP:
       return 1935;
+
+    case GST_RTMP_SCHEME_RTMPS:
+      return 443;
 
     default:
       g_return_val_if_reached (0);
@@ -301,6 +306,12 @@ socket_connect (GTask * task)
 
   addr = g_network_address_new (data->location.host, data->location.port);
   socket_client = g_socket_client_new ();
+
+  if (data->location.scheme == GST_RTMP_SCHEME_RTMPS) {
+    GST_DEBUG ("Configuring TLS");
+    g_socket_client_set_tls (socket_client, TRUE);
+  }
+
   g_socket_client_set_timeout (socket_client, data->location.timeout);
 
   GST_DEBUG ("Starting socket connection");

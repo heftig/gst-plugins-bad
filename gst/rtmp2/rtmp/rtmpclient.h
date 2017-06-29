@@ -29,6 +29,7 @@ G_BEGIN_DECLS
 typedef enum
 {
   GST_RTMP_SCHEME_RTMP = 0,
+  GST_RTMP_SCHEME_RTMPS,
 } GstRtmpScheme;
 
 GType gst_rtmp_scheme_get_type (void);
