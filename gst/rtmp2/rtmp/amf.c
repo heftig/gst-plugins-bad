@@ -653,6 +653,7 @@ parse_object (AmfParser * parser, GstAmfNode * node)
   while (TRUE) {
     name = parse_string (parser);
     if (!name) {
+      GST_ERROR ("object too long");
       break;
     }
 
@@ -693,13 +694,14 @@ parse_ecma_array (AmfParser * parser, GstAmfNode * node)
   /* FIXME This is weird.  The one time I've seen this, the encoded value
    * was 0, but the number of elements was 1. */
   if (n_elements == 0) {
+    GST_DEBUG ("Interpreting ECMA array length 0 as 1");
     n_elements = 1;
   }
 
   n_read = parse_object (parser, node);
 
   if (n_read != n_elements) {
-    GST_WARNING ("expected array with %" G_GUINT32_FORMAT " elements,"
+    GST_WARNING ("Expected array with %" G_GUINT32_FORMAT " elements,"
         " but read %" G_GUINT32_FORMAT, n_elements, n_read);
   }
 }
