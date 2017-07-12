@@ -646,8 +646,8 @@ parse_string (AmfParser * parser)
 static guint32
 parse_object (AmfParser * parser, GstAmfNode * node)
 {
-  gchar *name = NULL;
-  GstAmfNode *value = NULL;
+  gchar *name;
+  GstAmfNode *value;
   guint32 n_fields = 0;
 
   while (TRUE) {
@@ -664,6 +664,7 @@ parse_object (AmfParser * parser, GstAmfNode * node)
     }
 
     if (gst_amf_node_get_type (value) == GST_AMF_TYPE_OBJECT_END) {
+      gst_amf_node_free (value);
       break;
     }
 
@@ -672,10 +673,6 @@ parse_object (AmfParser * parser, GstAmfNode * node)
   };
 
   g_free (name);
-  if (value) {
-    gst_amf_node_free (value);
-  }
-
   return n_fields;
 }
 
