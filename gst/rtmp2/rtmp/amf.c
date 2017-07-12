@@ -22,10 +22,9 @@
 #include "config.h"
 #endif
 
+#include "amf.h"
 #include <string.h>
 #include <gst/gst.h>
-
-#include "amf.h"
 
 #define MAX_RECURSION_DEPTH 16
 
@@ -684,7 +683,7 @@ parse_ecma_array (AmfParser * parser, GstAmfNode * node)
 {
   guint32 n_elements, n_read;
 
-  if (parser->offset + 4 > parser->size) {
+  if (parser->offset + sizeof n_elements > parser->size) {
     GST_ERROR ("array size too long");
     return;
   }
@@ -711,7 +710,7 @@ parse_strict_array (AmfParser * parser, GstAmfNode * node)
   GstAmfNode *value = NULL;
   guint32 n_elements, i;
 
-  if (parser->offset + 4 > parser->size) {
+  if (parser->offset + sizeof n_elements > parser->size) {
     GST_ERROR ("array size too long");
     return;
   }
