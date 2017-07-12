@@ -479,14 +479,6 @@ dump_indent (GString * string, gint indent, guint depth)
   }
 }
 
-static inline void
-dump_string (GString * string, const gchar * value)
-{
-  g_string_append_c (string, '"');
-  g_string_append (string, value);
-  g_string_append_c (string, '"');
-}
-
 static void
 dump_node (GString * string, const GstAmfNode * node, gint indent,
     guint recursion_depth)
@@ -506,7 +498,7 @@ dump_node (GString * string, const GstAmfNode * node, gint indent,
       g_string_append_c (string, 'L');
       /* no break */
     case GST_AMF_TYPE_STRING:
-      dump_string (string, node->value.v_string);
+      gst_rtmp_string_print_escaped (string, node->value.v_string, -1);
       break;
 
     case GST_AMF_TYPE_ECMA_ARRAY:
@@ -519,7 +511,7 @@ dump_node (GString * string, const GstAmfNode * node, gint indent,
         for (i = 0; i < len; i++) {
           const AmfObjectField *field = get_field (node, i);
           dump_indent (string, indent, recursion_depth + 1);
-          dump_string (string, field->name);
+          gst_rtmp_string_print_escaped (string, field->name, -1);
           g_string_append_c (string, ':');
           g_string_append_c (string, ' ');
           dump_node (string, field->value, indent, recursion_depth + 1);
