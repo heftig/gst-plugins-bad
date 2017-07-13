@@ -23,6 +23,7 @@
 #endif
 
 #include "amf.h"
+#include "rtmputils.h"
 #include <string.h>
 #include <gst/gst.h>
 
@@ -31,11 +32,14 @@
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_amf_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_amf_debug_category
 
+static GBytes *null_bytes;
+
 static void
-init_debug (void)
+init_static (void)
 {
   static volatile gsize done = 0;
   if (g_once_init_enter (&done)) {
+    null_bytes = g_bytes_new_static (NULL, 0);
     GST_DEBUG_CATEGORY_INIT (gst_rtmp_amf_debug_category, "rtmpamf", 0,
         "debug category for the amf parser");
     g_once_init_leave (&done, 1);
@@ -110,7 +114,7 @@ struct _GstAmfNode
   {
     gint v_int;
     gdouble v_double;
-    gchar *v_string;
+    GBytes *v_bytes;
     GArray *v_fields;
     GPtrArray *v_elements;
   } value;
@@ -149,12 +153,17 @@ node_new (GstAmfType type)
 {
   GstAmfNode *node;
 
-  init_debug ();
+  init_static ();
 
   node = g_slice_alloc0 (sizeof *node);
   node->type = type;
 
   switch (type) {
+    case GST_AMF_TYPE_STRING:
+    case GST_AMF_TYPE_LONG_STRING:
+      node->value.v_bytes = g_bytes_ref (null_bytes);
+      break;
+
     case GST_AMF_TYPE_OBJECT:
     case GST_AMF_TYPE_ECMA_ARRAY:
       node->value.v_fields =
@@ -197,16 +206,18 @@ gst_amf_node_new_number (gdouble value)
 }
 
 GstAmfNode *
-gst_amf_node_new_string (const gchar * value)
+gst_amf_node_new_string (const gchar * value, gssize size)
 {
-  return gst_amf_node_new_take_string (g_strdup (value));
+  GstAmfNode *node = node_new (GST_AMF_TYPE_STRING);
+  gst_amf_node_set_string (node, value, size);
+  return node;
 }
 
 GstAmfNode *
-gst_amf_node_new_take_string (gchar * value)
+gst_amf_node_new_take_string (gchar * value, gssize size)
 {
   GstAmfNode *node = node_new (GST_AMF_TYPE_STRING);
-  gst_amf_node_take_string (node, value);
+  gst_amf_node_take_string (node, value, size);
   return node;
 }
 
@@ -228,7 +239,7 @@ gst_amf_node_copy (const GstAmfNode * node)
   switch (node->type) {
     case GST_AMF_TYPE_STRING:
     case GST_AMF_TYPE_LONG_STRING:
-      copy->value.v_string = g_strdup (node->value.v_string);
+      copy->value.v_bytes = g_bytes_ref (node->value.v_bytes);
       break;
 
     case GST_AMF_TYPE_OBJECT:
@@ -267,7 +278,7 @@ gst_amf_node_free (gpointer ptr)
   switch (node->type) {
     case GST_AMF_TYPE_STRING:
     case GST_AMF_TYPE_LONG_STRING:
-      g_free (node->value.v_string);
+      g_bytes_unref (node->value.v_bytes);
       break;
 
     case GST_AMF_TYPE_OBJECT:
@@ -310,18 +321,26 @@ gst_amf_node_get_number (const GstAmfNode * node)
 }
 
 gchar *
-gst_amf_node_get_string (const GstAmfNode * node)
+gst_amf_node_get_string (const GstAmfNode * node, gsize * out_size)
 {
-  return g_strdup (gst_amf_node_peek_string (node));
+  gsize size;
+  const gchar *data = gst_amf_node_peek_string (node, &size);
+
+  if (out_size) {
+    *out_size = size;
+    return g_memdup (data, size);
+  } else {
+    return g_strndup (data, size);
+  }
 }
 
 const gchar *
-gst_amf_node_peek_string (const GstAmfNode * node)
+gst_amf_node_peek_string (const GstAmfNode * node, gsize * size)
 {
   GstAmfType type = gst_amf_node_get_type (node);
   g_return_val_if_fail (type == GST_AMF_TYPE_STRING ||
       type == GST_AMF_TYPE_LONG_STRING, FALSE);
-  return node->value.v_string;
+  return g_bytes_get_data (node->value.v_bytes, size);
 }
 
 const GstAmfNode *
@@ -389,14 +408,14 @@ gst_amf_node_set_number (GstAmfNode * node, gdouble value)
 }
 
 void
-gst_amf_node_take_string (GstAmfNode * node, gchar * value)
+gst_amf_node_take_string (GstAmfNode * node, gchar * value, gssize size)
 {
-  gsize size;
-
   g_return_if_fail (node->type == GST_AMF_TYPE_STRING ||
       node->type == GST_AMF_TYPE_LONG_STRING);
 
-  size = strlen (value);
+  if (size < 0) {
+    size = strlen (value);
+  }
 
   if (size > G_MAXUINT32) {
     GST_WARNING ("Long string too long (%zu), truncating", size);
@@ -408,14 +427,23 @@ gst_amf_node_take_string (GstAmfNode * node, gchar * value)
     node->type = GST_AMF_TYPE_LONG_STRING;
   }
 
-  g_free (node->value.v_string);
-  node->value.v_string = value;
+  g_bytes_unref (node->value.v_bytes);
+  node->value.v_bytes = g_bytes_new_take (value, size);
 }
 
 void
-gst_amf_node_set_string (GstAmfNode * node, const gchar * value)
+gst_amf_node_set_string (GstAmfNode * node, const gchar * value, gssize size)
 {
-  gst_amf_node_take_string (node, g_strdup (value));
+  gchar *copy;
+
+  if (size < 0) {
+    size = strlen (value);
+    copy = g_memdup (value, size + 1);
+  } else {
+    copy = g_memdup (value, size);
+  }
+
+  gst_amf_node_take_string (node, copy, size);
 }
 
 void
@@ -450,17 +478,18 @@ gst_amf_node_append_field_boolean (GstAmfNode * node, const gchar * name,
 
 void
 gst_amf_node_append_field_string (GstAmfNode * node, const gchar * name,
-    const gchar * value)
+    const gchar * value, gssize size)
 {
-  gst_amf_node_append_field_take_string (node, name, g_strdup (value));
+  gst_amf_node_append_take_field (node, name,
+      gst_amf_node_new_string (value, size));
 }
 
 void
 gst_amf_node_append_field_take_string (GstAmfNode * node, const gchar * name,
-    gchar * value)
+    gchar * value, gssize size)
 {
   gst_amf_node_append_take_field (node, name,
-      gst_amf_node_new_take_string (value));
+      gst_amf_node_new_take_string (value, size));
 }
 
 /* Dumper *******************************************************************/
@@ -477,6 +506,14 @@ dump_indent (GString * string, gint indent, guint depth)
       g_string_append_c (string, ' ');
     }
   }
+}
+
+static inline void
+dump_bytes (GString * string, GBytes * value)
+{
+  gsize size;
+  const gchar *data = g_bytes_get_data (value, &size);
+  gst_rtmp_string_print_escaped (string, data, size);
 }
 
 static void
@@ -498,7 +535,7 @@ dump_node (GString * string, const GstAmfNode * node, gint indent,
       g_string_append_c (string, 'L');
       /* no break */
     case GST_AMF_TYPE_STRING:
-      gst_rtmp_string_print_escaped (string, node->value.v_string, -1);
+      dump_bytes (string, node->value.v_bytes);
       break;
 
     case GST_AMF_TYPE_ECMA_ARRAY:
@@ -635,10 +672,28 @@ parse_boolean (AmfParser * parser)
 }
 
 static gchar *
-parse_string (AmfParser * parser)
+read_string (AmfParser * parser, gsize size)
+{
+  gchar *string;
+
+  if (parser->offset + size > parser->size) {
+    GST_ERROR ("string too long (%zu)", size);
+    return NULL;
+  }
+
+  /* Null terminate the string */
+  string = g_malloc (size + 1);
+  memcpy (string, parser->data + parser->offset, size);
+  string[size] = 0;
+
+  parser->offset += size;
+  return string;
+}
+
+static gchar *
+parse_string (AmfParser * parser, gsize * out_size)
 {
   guint16 size;
-  gchar *string;
 
   if (parser->offset + sizeof size > parser->size) {
     GST_ERROR ("string size too long");
@@ -646,23 +701,17 @@ parse_string (AmfParser * parser)
   }
 
   size = parse_u16 (parser);
-
-  if (parser->offset + size > parser->size) {
-    GST_ERROR ("string too long");
-    return NULL;
+  if (out_size) {
+    *out_size = size;
   }
 
-  string = g_strndup ((gchar *) (parser->data + parser->offset), size);
-
-  parser->offset += size;
-  return string;
+  return read_string (parser, size);
 }
 
 static gchar *
-parse_long_string (AmfParser * parser)
+parse_long_string (AmfParser * parser, gsize * out_size)
 {
   guint32 size;
-  gchar *string;
 
   if (parser->offset + sizeof size > parser->size) {
     GST_ERROR ("long string size too long");
@@ -670,16 +719,26 @@ parse_long_string (AmfParser * parser)
   }
 
   size = parse_u32 (parser);
-
-  if (parser->offset + size > parser->size) {
-    GST_ERROR ("long string too long");
-    return NULL;
+  if (out_size) {
+    *out_size = size;
   }
 
-  string = g_strndup ((gchar *) (parser->data + parser->offset), size);
+  return read_string (parser, size);
+}
 
-  parser->offset += size;
-  return string;
+static inline GBytes *
+parse_bytes (AmfParser * parser, gboolean long_string)
+{
+  gchar *data;
+  gsize size;
+
+  if (long_string) {
+    data = parse_long_string (parser, &size);
+  } else {
+    data = parse_string (parser, &size);
+  }
+
+  return g_bytes_new_take (data, size + 1);
 }
 
 static guint32
@@ -690,7 +749,7 @@ parse_object (AmfParser * parser, GstAmfNode * node)
   guint32 n_fields = 0;
 
   while (TRUE) {
-    name = parse_string (parser);
+    name = parse_string (parser, NULL);
     if (!name) {
       GST_ERROR ("object too long");
       break;
@@ -795,10 +854,10 @@ parse_value (AmfParser * parser)
       node->value.v_int = parse_boolean (parser);
       break;
     case GST_AMF_TYPE_STRING:
-      node->value.v_string = parse_string (parser);
+      node->value.v_bytes = parse_bytes (parser, FALSE);
       break;
     case GST_AMF_TYPE_LONG_STRING:
-      node->value.v_string = parse_long_string (parser);
+      node->value.v_bytes = parse_bytes (parser, TRUE);
       break;
     case GST_AMF_TYPE_OBJECT:
       parse_object (parser, node);
@@ -839,7 +898,7 @@ gst_amf_parse_command (const guint8 * data, gsize size,
   g_return_val_if_fail (data, NULL);
   g_return_val_if_fail (size, NULL);
 
-  init_debug ();
+  init_static ();
 
   GST_LOG ("Starting parse with %" G_GSIZE_FORMAT " bytes", parser.size);
 
@@ -856,7 +915,7 @@ gst_amf_parse_command (const guint8 * data, gsize size,
   }
 
   GST_LOG ("Parsing command '%s', transid %.0f",
-      gst_amf_node_peek_string (node1), gst_amf_node_get_number (node2));
+      gst_amf_node_peek_string (node1, NULL), gst_amf_node_get_number (node2));
 
   args = g_ptr_array_new_with_free_func (gst_amf_node_free);
 
@@ -875,7 +934,7 @@ gst_amf_parse_command (const guint8 * data, gsize size,
   }
 
   if (command_name) {
-    *command_name = gst_amf_node_get_string (node1);
+    *command_name = gst_amf_node_get_string (node1, NULL);
   }
 
   if (transaction_id) {
@@ -926,9 +985,11 @@ serialize_boolean (GByteArray * array, gboolean value)
 }
 
 static void
-serialize_string (GByteArray * array, const gchar * string)
+serialize_string (GByteArray * array, const gchar * string, gssize size)
 {
-  gsize size = strlen (string);
+  if (size < 0) {
+    size = strlen (string);
+  }
 
   if (size > G_MAXUINT16) {
     GST_WARNING ("String too long: %zu", size);
@@ -940,9 +1001,11 @@ serialize_string (GByteArray * array, const gchar * string)
 }
 
 static void
-serialize_long_string (GByteArray * array, const gchar * string)
+serialize_long_string (GByteArray * array, const gchar * string, gssize size)
 {
-  gsize size = strlen (string);
+  if (size < 0) {
+    size = strlen (string);
+  }
 
   if (size > G_MAXUINT32) {
     GST_WARNING ("Long string too long: %zu", size);
@@ -953,6 +1016,19 @@ serialize_long_string (GByteArray * array, const gchar * string)
   g_byte_array_append (array, (guint8 *) string, size);
 }
 
+static inline void
+serialize_bytes (GByteArray * array, GBytes * bytes, gboolean long_string)
+{
+  gsize size;
+  const gchar *data = g_bytes_get_data (bytes, &size);
+
+  if (long_string) {
+    serialize_long_string (array, data, size);
+  } else {
+    serialize_string (array, data, size);
+  }
+}
+
 static void
 serialize_object (GByteArray * array, const GstAmfNode * node)
 {
@@ -960,7 +1036,7 @@ serialize_object (GByteArray * array, const GstAmfNode * node)
 
   for (i = 0; i < gst_amf_node_get_num_fields (node); i++) {
     const AmfObjectField *field = get_field (node, i);
-    serialize_string (array, field->name);
+    serialize_string (array, field->name, -1);
     serialize_value (array, field->value);
   }
   serialize_u16 (array, 0);
@@ -987,10 +1063,10 @@ serialize_value (GByteArray * array, const GstAmfNode * node)
       serialize_boolean (array, node->value.v_int);
       break;
     case GST_AMF_TYPE_STRING:
-      serialize_string (array, node->value.v_string);
+      serialize_bytes (array, node->value.v_bytes, FALSE);
       break;
     case GST_AMF_TYPE_LONG_STRING:
-      serialize_long_string (array, node->value.v_string);
+      serialize_bytes (array, node->value.v_bytes, TRUE);
       break;
     case GST_AMF_TYPE_OBJECT:
       serialize_object (array, node);
@@ -1040,7 +1116,7 @@ gst_amf_serialize_command_valist (gdouble transaction_id,
       transaction_id);
 
   serialize_u8 (array, GST_AMF_TYPE_STRING);
-  serialize_string (array, command_name);
+  serialize_string (array, command_name, -1);
   serialize_u8 (array, GST_AMF_TYPE_NUMBER);
   serialize_number (array, transaction_id);
   serialize_value (array, argument);

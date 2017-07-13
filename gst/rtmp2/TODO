@@ -3,7 +3,6 @@
 
 - Move AMF parser/serializer to GstRtmpMeta?
 - Move AMF nodes from g_slice to GstMiniObject?
-- AMF strings are not C strings and could contain embedded nulls
 
 - rtmp_tea_decode looks rather unsafe and maybe reads past the end of text
   (it reads chunks of 8 chars)
