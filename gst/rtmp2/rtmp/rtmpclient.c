@@ -475,10 +475,10 @@ send_connect (GTask * task)
     uristr = g_strdup (uri);
   }
 
-  gst_amf_node_append_field_take_string (node, g_strdup ("app"), appstr);
-  gst_amf_node_append_field_take_string (node, g_strdup ("tcUrl"), uristr);
-  gst_amf_node_append_field_string (node, "type", "nonprivate");
-  gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0");
+  gst_amf_node_append_field_take_string (node, g_strdup ("app"), appstr, -1);
+  gst_amf_node_append_field_take_string (node, g_strdup ("tcUrl"), uristr, -1);
+  gst_amf_node_append_field_string (node, "type", "nonprivate", -1);
+  gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0", -1);
 
   gst_rtmp_connection_send_command (data->connection, send_connect_done,
       task, 0, "connect", node, NULL);
@@ -518,13 +518,13 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
     return;
   }
 
-  code = gst_amf_node_peek_string (node);
+  code = gst_amf_node_peek_string (node, NULL);
   GST_INFO ("connect result: %s", GST_STR_NULL (code));
 
   if (g_str_equal (code, "NetConnection.Connect.Success")) {
     node = gst_amf_node_get_field (optional_args, "secureToken");
     send_secure_token_response (task, data->connection,
-        node ? gst_amf_node_peek_string (node) : NULL);
+        node ? gst_amf_node_peek_string (node, NULL) : NULL);
     return;
   }
 
@@ -542,7 +542,7 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
       return;
     }
 
-    desc = gst_amf_node_peek_string (node);
+    desc = gst_amf_node_peek_string (node, NULL);
     GST_DEBUG ("connect result desc: %s", GST_STR_NULL (desc));
 
     if (authmod == GST_RTMP_AUTHMOD_AUTO && strstr (desc, "code=403 need auth")) {
@@ -742,7 +742,7 @@ send_secure_token_response (GTask * task, GstRtmpConnection * connection,
     GST_DEBUG ("response: %s", response);
 
     node1 = gst_amf_node_new_null ();
-    node2 = gst_amf_node_new_take_string (response);
+    node2 = gst_amf_node_new_take_string (response, -1);
     gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
         "secureTokenResponse", node1, node2, NULL);
     gst_amf_node_free (node1);
@@ -843,7 +843,7 @@ send_create_stream (GTask * task)
   GstAmfNode *command_object, *stream_name;
 
   command_object = gst_amf_node_new_null ();
-  stream_name = gst_amf_node_new_string (data->stream);
+  stream_name = gst_amf_node_new_string (data->stream, -1);
 
   if (data->publish) {
     /* Not part of RTMP documentation */
@@ -918,11 +918,11 @@ send_publish_or_play (GTask * task)
   GstAmfNode *command_object, *stream_name, *argument;
 
   command_object = gst_amf_node_new_null ();
-  stream_name = gst_amf_node_new_string (data->stream);
+  stream_name = gst_amf_node_new_string (data->stream, -1);
 
   if (data->publish) {
     /* publishing type (live, record, append) */
-    argument = gst_amf_node_new_string ("live");
+    argument = gst_amf_node_new_string ("live", -1);
   } else {
     /* "Start" argument: -2 = live or recording, -1 = only live
        0 or positive = only recording, seek to X seconds */
@@ -969,7 +969,7 @@ on_publish_or_play_status (const gchar * command_name, GPtrArray * args,
     code_object = gst_amf_node_get_field (info_object, "code");
 
     if (code_object) {
-      code = gst_amf_node_peek_string (code_object);
+      code = gst_amf_node_peek_string (code_object, NULL);
     }
 
     info_dump = g_string_new ("");

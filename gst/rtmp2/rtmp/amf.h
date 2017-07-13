@@ -55,8 +55,8 @@ typedef struct _GstAmfNode GstAmfNode;
 GstAmfNode * gst_amf_node_new_null (void);
 GstAmfNode * gst_amf_node_new_number (gdouble value);
 GstAmfNode * gst_amf_node_new_boolean (gboolean value);
-GstAmfNode * gst_amf_node_new_string (const gchar * value);
-GstAmfNode * gst_amf_node_new_take_string (gchar * value);
+GstAmfNode * gst_amf_node_new_string (const gchar * value, gssize size);
+GstAmfNode * gst_amf_node_new_take_string (gchar * value, gssize size);
 GstAmfNode * gst_amf_node_new_object (void);
 
 GstAmfNode * gst_amf_node_copy (const GstAmfNode * node);
@@ -65,8 +65,8 @@ void gst_amf_node_free (gpointer ptr);
 GstAmfType gst_amf_node_get_type (const GstAmfNode * node);
 gdouble gst_amf_node_get_number (const GstAmfNode * node);
 gboolean gst_amf_node_get_boolean (const GstAmfNode * node);
-gchar * gst_amf_node_get_string (const GstAmfNode * node);
-const gchar * gst_amf_node_peek_string (const GstAmfNode * node);
+gchar * gst_amf_node_get_string (const GstAmfNode * node, gsize * size);
+const gchar * gst_amf_node_peek_string (const GstAmfNode * node, gsize * size);
 
 const GstAmfNode * gst_amf_node_get_field (const GstAmfNode * node,
     const gchar * name);
@@ -80,8 +80,8 @@ guint gst_amf_node_get_num_elements (const GstAmfNode * node);
 
 void gst_amf_node_set_number (GstAmfNode * node, gdouble value);
 void gst_amf_node_set_boolean (GstAmfNode * node, gboolean value);
-void gst_amf_node_set_string (GstAmfNode * node, const gchar * value);
-void gst_amf_node_take_string (GstAmfNode * node, gchar * value);
+void gst_amf_node_set_string (GstAmfNode * node, const gchar * value, gssize size);
+void gst_amf_node_take_string (GstAmfNode * node, gchar * value, gssize size);
 
 void gst_amf_node_append_field (GstAmfNode * node,
     const gchar * name, const GstAmfNode * value);
@@ -92,9 +92,9 @@ void gst_amf_node_append_field_number (GstAmfNode * node,
 void gst_amf_node_append_field_boolean (GstAmfNode * node,
     const gchar * name, gboolean value);
 void gst_amf_node_append_field_string (GstAmfNode * node,
-    const gchar * name, const gchar * value);
+    const gchar * name, const gchar * value, gssize size);
 void gst_amf_node_append_field_take_string (GstAmfNode * node,
-    const gchar * name, gchar * value);
+    const gchar * name, gchar * value, gssize size);
 
 void gst_amf_node_dump (const GstAmfNode * node, gint indent,
     GString * string);
