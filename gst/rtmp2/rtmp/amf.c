@@ -419,14 +419,14 @@ void
 gst_amf_node_append_field_number (GstAmfNode * node, const gchar * name,
     gdouble value)
 {
-  gst_amf_node_append_field (node, name, gst_amf_node_new_number (value));
+  gst_amf_node_append_take_field (node, name, gst_amf_node_new_number (value));
 }
 
 void
 gst_amf_node_append_field_boolean (GstAmfNode * node, const gchar * name,
     gboolean value)
 {
-  gst_amf_node_append_field (node, name, gst_amf_node_new_boolean (value));
+  gst_amf_node_append_take_field (node, name, gst_amf_node_new_boolean (value));
 }
 
 void
@@ -440,7 +440,8 @@ void
 gst_amf_node_append_field_take_string (GstAmfNode * node, const gchar * name,
     gchar * value)
 {
-  gst_amf_node_append_field (node, name, gst_amf_node_new_take_string (value));
+  gst_amf_node_append_take_field (node, name,
+      gst_amf_node_new_take_string (value));
 }
 
 /* Dumper *******************************************************************/
