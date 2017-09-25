@@ -76,6 +76,7 @@ typedef struct
 
   GstBuffer *message;
   gboolean sent_header;
+  GstClockTime last_ts;
 } GstRtmp2Src;
 
 typedef struct
@@ -408,6 +409,7 @@ gst_rtmp2_src_start (GstBaseSrc * src)
   self->connector = g_task_new (self, cancellable, connect_task_done, NULL);
   self->stream_id = 0;
   self->sent_header = FALSE;
+  self->last_ts = GST_CLOCK_TIME_NONE;
 
   if (async) {
     gst_task_start (self->task);
@@ -495,7 +497,7 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
   GstRtmp2Src *self = GST_RTMP2_SRC (src);
   GstBuffer *message, *buffer;
   GstRtmpMeta *meta;
-  guint32 timestamp;
+  guint32 timestamp = 0;
 
   static const guint8 flv_header_data[] = {
     0x46, 0x4c, 0x56, 0x01, 0x01, 0x00, 0x00, 0x00,
@@ -527,17 +529,25 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
   g_cond_signal (&self->cond);
   g_mutex_unlock (&self->lock);
 
-  if (GST_BUFFER_DTS_IS_VALID (message)) {
-    timestamp = GST_BUFFER_DTS (message) / GST_MSECOND;
-  } else {
-    timestamp = 0;
-  }
-
   meta = gst_buffer_get_rtmp_meta (message);
   if (!meta) {
     GST_ERROR_OBJECT (self, "%" GST_PTR_FORMAT " has no RTMP meta", message);
     gst_buffer_unref (message);
     return GST_FLOW_ERROR;
+  }
+
+  if (GST_BUFFER_DTS_IS_VALID (message)) {
+    GstClockTime last_ts = self->last_ts;
+
+    timestamp = GST_BUFFER_DTS (message) / GST_MSECOND;
+
+    if (GST_CLOCK_TIME_IS_VALID (last_ts) && last_ts > timestamp) {
+      GST_WARNING_OBJECT (self, "Timestamp regression: %" GST_TIME_FORMAT
+          " > %" GST_TIME_FORMAT, GST_TIME_ARGS (last_ts),
+          GST_TIME_ARGS (timestamp));
+    }
+
+    self->last_ts = timestamp;
   }
 
   buffer = gst_buffer_copy_region (message, GST_BUFFER_COPY_MEMORY, 0, -1);
