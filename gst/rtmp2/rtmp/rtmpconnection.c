@@ -714,6 +714,13 @@ gst_rtmp_connection_handle_user_control (GstRtmpConnection * connection,
   }
 }
 
+static gboolean
+is_command_response (const gchar * command_name)
+{
+  return g_strcmp0 (command_name, "_result") == 0 ||
+      g_strcmp0 (command_name, "_error") == 0;
+}
+
 static void
 gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
 {
@@ -902,6 +909,7 @@ gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
 
   g_return_if_fail (response_command);
   g_return_if_fail (command_name);
+  g_return_if_fail (!is_command_response (command_name));
 
   GST_TRACE ("Registering %s for stream id %" G_GUINT32_FORMAT
       " name \"%s\"", GST_DEBUG_FUNCPTR_NAME (response_command),
