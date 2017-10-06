@@ -131,7 +131,7 @@ dts_to_abs_ts (GstBuffer * buffer)
     ret = gst_util_uint64_scale_round (dts, 1, GST_MSECOND);
   }
 
-  GST_LOG ("Converted DTS %" GST_TIME_FORMAT " into abs TS %"
+  GST_TRACE ("Converted DTS %" GST_TIME_FORMAT " into abs TS %"
       G_GUINT32_FORMAT " ms", GST_TIME_ARGS (dts), ret);
   return ret;
 }
@@ -161,8 +161,8 @@ dts_diff_to_delta_ts (GstBuffer * old_buffer, GstBuffer * buffer,
   /* underflow wraps around */
   delta_32 = abs_ts - old_abs_ts;
 
-  GST_LOG ("Converted DTS %" GST_TIME_FORMAT " (%" G_GUINT32_FORMAT " ms) -> %"
-      GST_TIME_FORMAT " (%" G_GUINT32_FORMAT " ms) into delta TS %"
+  GST_TRACE ("Converted DTS %" GST_TIME_FORMAT " (%" G_GUINT32_FORMAT
+      " ms) -> %" GST_TIME_FORMAT " (%" G_GUINT32_FORMAT " ms) into delta TS %"
       G_GUINT32_FORMAT " ms", GST_TIME_ARGS (old_dts), old_abs_ts,
       GST_TIME_ARGS (dts), abs_ts, delta_32);
 
@@ -188,7 +188,7 @@ select_chunk_type (GstRtmpChunkStream * cstream, GstBuffer * buffer)
   meta->cstream = cstream->id;
 
   if (!old_buffer) {
-    GST_DEBUG ("Picking header 0: no previous header");
+    GST_TRACE ("Picking header 0: no previous header");
     meta->ts_delta = dts_to_abs_ts (buffer);
     return CHUNK_TYPE_0;
   }
@@ -196,7 +196,7 @@ select_chunk_type (GstRtmpChunkStream * cstream, GstBuffer * buffer)
   old_meta = gst_buffer_get_rtmp_meta (old_buffer);
 
   if (old_meta->mstream != meta->mstream) {
-    GST_DEBUG ("Picking header 0: stream mismatch; "
+    GST_TRACE ("Picking header 0: stream mismatch; "
         "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
         old_meta->mstream, meta->mstream);
     meta->ts_delta = dts_to_abs_ts (buffer);
@@ -204,7 +204,7 @@ select_chunk_type (GstRtmpChunkStream * cstream, GstBuffer * buffer)
   }
 
   if (!dts_diff_to_delta_ts (old_buffer, buffer, &meta->ts_delta)) {
-    GST_DEBUG ("Picking header 0: timestamp delta overflow");
+    GST_TRACE ("Picking header 0: timestamp delta overflow");
     meta->ts_delta = dts_to_abs_ts (buffer);
     return CHUNK_TYPE_0;
   }
@@ -212,13 +212,13 @@ select_chunk_type (GstRtmpChunkStream * cstream, GstBuffer * buffer)
   /* now at least type 1 */
 
   if (old_meta->type != meta->type) {
-    GST_LOG ("Picking header 1: type mismatch; want %d got %d",
+    GST_TRACE ("Picking header 1: type mismatch; want %d got %d",
         old_meta->type, meta->type);
     return CHUNK_TYPE_1;
   }
 
   if (old_meta->size != meta->size) {
-    GST_LOG ("Picking header 1: size mismatch; "
+    GST_TRACE ("Picking header 1: size mismatch; "
         "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
         old_meta->size, meta->size);
     return CHUNK_TYPE_1;
@@ -227,7 +227,7 @@ select_chunk_type (GstRtmpChunkStream * cstream, GstBuffer * buffer)
   /* now at least type 2 */
 
   if (old_meta->ts_delta != meta->ts_delta) {
-    GST_LOG ("Picking header 2: timestamp delta mismatch; "
+    GST_TRACE ("Picking header 2: timestamp delta mismatch; "
         "want %" G_GUINT32_FORMAT " got %" G_GUINT32_FORMAT,
         old_meta->ts_delta, meta->ts_delta);
     return CHUNK_TYPE_2;
@@ -235,7 +235,7 @@ select_chunk_type (GstRtmpChunkStream * cstream, GstBuffer * buffer)
 
   /* now at least type 3 */
 
-  GST_LOG ("Picking header 3");
+  GST_TRACE ("Picking header 3");
   return CHUNK_TYPE_3;
 }
 
@@ -250,7 +250,7 @@ serialize_next (GstRtmpChunkStream * cstream, guint32 chunk_size,
   GstBuffer *ret;
   GstMapInfo map;
 
-  GST_LOG ("Serializing a chunk of type %d, offset %" G_GUINT32_FORMAT,
+  GST_TRACE ("Serializing a chunk of type %d, offset %" G_GUINT32_FORMAT,
       type, cstream->offset);
 
   if (cstream->id < CHUNK_STREAM_MIN_TWOBYTE) {
@@ -269,7 +269,7 @@ serialize_next (GstRtmpChunkStream * cstream, guint32 chunk_size,
     header_size += 4;
   }
 
-  GST_LOG ("Allocating buffer, header size %" G_GSIZE_FORMAT, header_size);
+  GST_TRACE ("Allocating buffer, header size %" G_GSIZE_FORMAT, header_size);
 
   ret = gst_buffer_new_allocate (NULL, header_size, NULL);
   if (!ret) {
@@ -335,7 +335,8 @@ serialize_next (GstRtmpChunkStream * cstream, guint32 chunk_size,
   if (meta->size > 0) {
     guint32 payload_size = chunk_stream_next_size (cstream, chunk_size);
 
-    GST_LOG ("Appending %" G_GUINT32_FORMAT " bytes of payload", payload_size);
+    GST_TRACE ("Appending %" G_GUINT32_FORMAT " bytes of payload",
+        payload_size);
 
     gst_buffer_copy_into (ret, cstream->buffer, GST_BUFFER_COPY_MEMORY,
         cstream->offset, payload_size);
@@ -344,7 +345,7 @@ serialize_next (GstRtmpChunkStream * cstream, guint32 chunk_size,
     cstream->offset += payload_size;
     cstream->bytes += payload_size;
   } else {
-    GST_LOG ("Chunk has no payload");
+    GST_TRACE ("Chunk has no payload");
   }
 
   gst_rtmp_buffer_dump (ret, ">>> chunk");
@@ -366,7 +367,7 @@ gst_rtmp_chunk_stream_parse_id (const guint8 * data, gsize size)
   guint32 ret;
 
   if (size < 1) {
-    GST_LOG ("Not enough bytes to read ID");
+    GST_TRACE ("Not enough bytes to read ID");
     return 0;
   }
 
@@ -375,7 +376,7 @@ gst_rtmp_chunk_stream_parse_id (const guint8 * data, gsize size)
   switch (ret) {
     case CHUNK_BYTE_TWOBYTE:
       if (size < 2) {
-        GST_LOG ("Not enough bytes to read two-byte ID");
+        GST_TRACE ("Not enough bytes to read two-byte ID");
         return 0;
       }
 
@@ -384,7 +385,7 @@ gst_rtmp_chunk_stream_parse_id (const guint8 * data, gsize size)
 
     case CHUNK_BYTE_THREEBYTE:
       if (size < 3) {
-        GST_LOG ("Not enough bytes to read three-byte ID");
+        GST_TRACE ("Not enough bytes to read three-byte ID");
         return 0;
       }
 
@@ -392,7 +393,7 @@ gst_rtmp_chunk_stream_parse_id (const guint8 * data, gsize size)
       break;
   }
 
-  GST_LOG ("Parsed chunk stream ID %" G_GUINT32_FORMAT, ret);
+  GST_TRACE ("Parsed chunk stream ID %" G_GUINT32_FORMAT, ret);
   return ret;
 }
 
@@ -408,9 +409,12 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
   gboolean has_abs_timestamp = FALSE;
 
   g_return_val_if_fail (cstream, 0);
+  g_return_val_if_fail (cstream->id == gst_rtmp_chunk_stream_parse_id (data,
+          size), 0);
 
   type = GST_READ_UINT8 (data) >> 6;
-  GST_LOG ("Parsing chunk header type %d", type);
+  GST_TRACE ("Parsing chunk stream %" G_GUINT32_FORMAT " header type %d",
+      cstream->id, type);
 
   switch (GST_READ_UINT8 (data) & CHUNK_BYTE_MASK) {
     case CHUNK_BYTE_TWOBYTE:
@@ -430,8 +434,7 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
   if (cstream->buffer) {
     buffer = cstream->buffer;
     meta = cstream->meta;
-
-    GST_LOG ("Starting parse with existing %" GST_PTR_FORMAT, buffer);
+    g_assert (meta->cstream == cstream->id);
   } else {
     buffer = gst_buffer_new ();
     GST_BUFFER_DTS (buffer) = 0;
@@ -446,11 +449,9 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
   }
 
   if (size < header_size) {
-    GST_LOG ("not enough bytes to read header");
+    GST_TRACE ("not enough bytes to read header");
     return header_size;
   }
-
-  g_assert (meta->cstream == gst_rtmp_chunk_stream_parse_id (data, size));
 
   switch (type) {
     case CHUNK_TYPE_0:
@@ -470,11 +471,11 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
         guint32 timestamp;
 
         if (size < header_size + 4) {
-          GST_LOG ("not enough bytes to read extended timestamp");
+          GST_TRACE ("not enough bytes to read extended timestamp");
           return header_size + 4;
         }
 
-        GST_DEBUG ("Reading extended timestamp");
+        GST_TRACE ("Reading extended timestamp");
         timestamp = GST_READ_UINT32_BE (data + header_size);
 
         if (type == 3 && meta->ts_delta != timestamp) {
@@ -503,7 +504,7 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
       abs_32 = delta_32 + dts / GST_MSECOND;
     }
 
-    GST_LOG ("Timestamp delta is %" G_GUINT32_FORMAT " (absolute %"
+    GST_TRACE ("Timestamp delta is %" G_GUINT32_FORMAT " (absolute %"
         G_GUINT32_FORMAT ")", delta_32, abs_32);
 
     /* emulate signed overflow */
@@ -521,11 +522,11 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
     delta_64 *= GST_MSECOND;
     GST_BUFFER_DTS (buffer) += delta_64;
 
-    GST_LOG ("Adjusted buffer DTS (%" GST_TIME_FORMAT ") by %"
+    GST_TRACE ("Adjusted buffer DTS (%" GST_TIME_FORMAT ") by %"
         GST_STIME_FORMAT " to %" GST_TIME_FORMAT, GST_TIME_ARGS (dts),
         GST_STIME_ARGS (delta_64), GST_TIME_ARGS (GST_BUFFER_DTS (buffer)));
   } else {
-    GST_LOG ("Message payload already started; not touching timestamp");
+    GST_TRACE ("Message payload already started; not touching timestamp");
   }
 
   return header_size;
@@ -543,7 +544,7 @@ gst_rtmp_chunk_stream_parse_payload (GstRtmpChunkStream * cstream,
   if (!chunk_stream_is_open (cstream)) {
     guint32 size = cstream->meta->size;
 
-    GST_LOG ("Allocating buffer, payload size %" G_GUINT32_FORMAT, size);
+    GST_TRACE ("Allocating buffer, payload size %" G_GUINT32_FORMAT, size);
 
     mem = gst_allocator_alloc (NULL, size, 0);
     if (!mem) {
@@ -623,7 +624,7 @@ gst_rtmp_chunk_stream_serialize_start (GstRtmpChunkStream * cstream,
   type = select_chunk_type (cstream, buffer);
   g_return_val_if_fail (type >= 0, NULL);
 
-  GST_LOG ("Starting serialization of message %" GST_PTR_FORMAT
+  GST_TRACE ("Starting serialization of message %" GST_PTR_FORMAT
       " into stream %" G_GUINT32_FORMAT, buffer, cstream->id);
 
   gst_rtmp_buffer_dump (buffer, ">>> message");
@@ -642,11 +643,11 @@ gst_rtmp_chunk_stream_serialize_next (GstRtmpChunkStream * cstream,
   g_return_val_if_fail (cstream->buffer, NULL);
 
   if (chunk_stream_next_size (cstream, chunk_size) == 0) {
-    GST_LOG ("Message serialization finished");
+    GST_TRACE ("Message serialization finished");
     return NULL;
   }
 
-  GST_LOG ("Continuing serialization of message %" GST_PTR_FORMAT
+  GST_TRACE ("Continuing serialization of message %" GST_PTR_FORMAT
       " into stream %" G_GUINT32_FORMAT, cstream->buffer, cstream->id);
 
   return serialize_next (cstream, chunk_size, CHUNK_TYPE_3);
@@ -690,7 +691,7 @@ gst_rtmp_chunk_streams_get (GstRtmpChunkStreams * cstreams, guint32 id)
   for (i = 0; i < array->len; i++) {
     entry = &g_array_index (array, GstRtmpChunkStream, i);
     if (entry->id == id) {
-      GST_LOG ("Obtaining chunk stream %" G_GUINT32_FORMAT, id);
+      GST_TRACE ("Obtaining chunk stream %" G_GUINT32_FORMAT, id);
       return entry;
     }
   }
