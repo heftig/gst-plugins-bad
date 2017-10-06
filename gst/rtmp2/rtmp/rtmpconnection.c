@@ -300,7 +300,7 @@ cancel_all_commands (GstRtmpConnection * self)
 
   for (l = self->transactions; l; l = g_list_next (l)) {
     Transaction *cc = l->data;
-    GST_TRACE ("calling transaction callback %s",
+    GST_LOG ("calling transaction callback %s",
         GST_DEBUG_FUNCPTR_NAME (cc->func));
     cc->func ("<cancelled>", NULL, cc->user_data);
   }
@@ -309,7 +309,7 @@ cancel_all_commands (GstRtmpConnection * self)
 
   for (l = self->expected_commands; l; l = g_list_next (l)) {
     ExpectedCommand *cc = l->data;
-    GST_TRACE ("calling expected command callback %s",
+    GST_LOG ("calling expected command callback %s",
         GST_DEBUG_FUNCPTR_NAME (cc->func));
     cc->func ("<cancelled>", NULL, cc->user_data);
   }
@@ -386,7 +386,7 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
   guint oldsize;
   GError *error = NULL;
 
-  GST_LOG ("input ready");
+  GST_TRACE ("input ready");
 
   oldsize = sc->input_bytes->len;
   g_byte_array_set_size (sc->input_bytes, oldsize + READ_SIZE);
@@ -418,7 +418,7 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
     return G_SOURCE_REMOVE;
   }
 
-  GST_LOG ("read %" G_GSIZE_FORMAT " bytes", ret);
+  GST_TRACE ("read %" G_GSIZE_FORMAT " bytes", ret);
 
   sc->total_input_bytes += ret;
   sc->bytes_since_ack += ret;
@@ -517,11 +517,11 @@ gst_rtmp_connection_try_read (GstRtmpConnection * connection)
       len = connection->input_bytes->len;
 
   if (len < need) {
-    GST_LOG ("got %u < %u bytes, need more", len, need);
+    GST_TRACE ("got %u < %u bytes, need more", len, need);
     return;
   }
 
-  GST_LOG ("got %u >= %u bytes, proceeding", len, need);
+  GST_TRACE ("got %u >= %u bytes, proceeding", len, need);
   gst_rtmp_connection_do_read (connection);
 }
 
@@ -767,7 +767,7 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
           continue;
         }
 
-        GST_TRACE ("calling transaction callback %s",
+        GST_LOG ("calling transaction callback %s",
             GST_DEBUG_FUNCPTR_NAME (t->func));
         sc->transactions = g_list_remove_link (sc->transactions, l);
         t->func (command_name, args, t->user_data);
@@ -782,7 +782,7 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
     GList *l;
 
     if (transaction_id != 0) {
-      GST_WARNING ("Server sent command \"%s\" expecting reply",
+      GST_FIXME ("Server sent command \"%s\" expecting reply",
           GST_STR_NULL (command_name));
     }
 
@@ -797,7 +797,7 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
         continue;
       }
 
-      GST_TRACE ("calling expected command callback %s",
+      GST_LOG ("calling expected command callback %s",
           GST_DEBUG_FUNCPTR_NAME (ec->func));
       sc->expected_commands = g_list_remove_link (sc->expected_commands, l);
       ec->func (command_name, args, ec->user_data);
@@ -894,7 +894,7 @@ gst_rtmp_connection_send_command (GstRtmpConnection * connection,
 
     transaction_id = ++connection->transaction_count;
 
-    GST_TRACE ("Registering %s for transid %.0f",
+    GST_LOG ("Registering %s for transid %.0f",
         GST_DEBUG_FUNCPTR_NAME (response_command), transaction_id);
 
     t = transaction_new (transaction_id, response_command, user_data);
@@ -926,7 +926,7 @@ gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
   g_return_if_fail (command_name);
   g_return_if_fail (!is_command_response (command_name));
 
-  GST_TRACE ("Registering %s for stream id %" G_GUINT32_FORMAT
+  GST_LOG ("Registering %s for stream id %" G_GUINT32_FORMAT
       " name \"%s\"", GST_DEBUG_FUNCPTR_NAME (response_command),
       stream_id, command_name);
 
