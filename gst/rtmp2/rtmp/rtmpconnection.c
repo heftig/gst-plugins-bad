@@ -728,7 +728,6 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
   gchar *command_name;
   gdouble transaction_id;
   GPtrArray *args;
-  GList *l;
 
   {
     GstMapInfo map;
@@ -757,38 +756,54 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
       G_GUINT32_FORMAT, GST_STR_NULL (command_name), transaction_id,
       meta->size);
 
-  for (l = sc->transactions; l; l = g_list_next (l)) {
-    Transaction *t = l->data;
+  if (is_command_response (command_name)) {
+    if (transaction_id != 0) {
+      GList *l;
 
-    if (t->transaction_id != transaction_id) {
-      continue;
+      for (l = sc->transactions; l; l = g_list_next (l)) {
+        Transaction *t = l->data;
+
+        if (t->transaction_id != transaction_id) {
+          continue;
+        }
+
+        GST_TRACE ("calling transaction callback %s",
+            GST_DEBUG_FUNCPTR_NAME (t->func));
+        sc->transactions = g_list_remove_link (sc->transactions, l);
+        t->func (command_name, args, t->user_data);
+        g_list_free_full (l, transaction_free);
+        break;
+      }
+    } else {
+      GST_WARNING ("Server sent response \"%s\" without transaction",
+          GST_STR_NULL (command_name));
+    }
+  } else {
+    GList *l;
+
+    if (transaction_id != 0) {
+      GST_WARNING ("Server sent command \"%s\" expecting reply",
+          GST_STR_NULL (command_name));
     }
 
-    GST_TRACE ("calling transaction callback %s",
-        GST_DEBUG_FUNCPTR_NAME (t->func));
-    sc->transactions = g_list_remove_link (sc->transactions, l);
-    t->func (command_name, args, t->user_data);
-    g_list_free_full (l, transaction_free);
-    break;
-  }
+    for (l = sc->expected_commands; l; l = g_list_next (l)) {
+      ExpectedCommand *ec = l->data;
 
-  for (l = sc->expected_commands; l; l = g_list_next (l)) {
-    ExpectedCommand *ec = l->data;
+      if (ec->stream_id != meta->mstream) {
+        continue;
+      }
 
-    if (ec->stream_id != meta->mstream) {
-      continue;
+      if (g_strcmp0 (ec->command_name, command_name)) {
+        continue;
+      }
+
+      GST_TRACE ("calling expected command callback %s",
+          GST_DEBUG_FUNCPTR_NAME (ec->func));
+      sc->expected_commands = g_list_remove_link (sc->expected_commands, l);
+      ec->func (command_name, args, ec->user_data);
+      g_list_free_full (l, expected_command_free);
+      break;
     }
-
-    if (g_strcmp0 (ec->command_name, command_name)) {
-      continue;
-    }
-
-    GST_TRACE ("calling expected command callback %s",
-        GST_DEBUG_FUNCPTR_NAME (ec->func));
-    sc->expected_commands = g_list_remove_link (sc->expected_commands, l);
-    ec->func (command_name, args, ec->user_data);
-    g_list_free_full (l, expected_command_free);
-    break;
   }
 
   g_free (command_name);
