@@ -705,10 +705,12 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
 
   if (!isfinite (transaction_id) || transaction_id < 0 ||
       transaction_id > G_MAXUINT) {
-    GST_WARNING ("Server sent extreme transaction id %.0f", transaction_id);
+    GST_WARNING ("Server sent command \"%s\" with extreme transaction ID %.0f",
+        GST_STR_NULL (command_name), transaction_id);
   } else if (transaction_id > sc->transaction_count) {
-    GST_WARNING ("Server sent command with unused transaction ID (%.0f > %u)",
-        transaction_id, sc->transaction_count);
+    GST_WARNING ("Server sent command \"%s\" with unused transaction ID "
+        "(%.0f > %u)", GST_STR_NULL (command_name), transaction_id,
+        sc->transaction_count);
     sc->transaction_count = transaction_id;
   }
 
