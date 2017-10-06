@@ -900,7 +900,7 @@ gst_amf_parse_command (const guint8 * data, gsize size,
 
   init_static ();
 
-  GST_LOG ("Starting parse with %" G_GSIZE_FORMAT " bytes", parser.size);
+  GST_TRACE ("Starting parse with %" G_GSIZE_FORMAT " bytes", parser.size);
 
   node1 = parse_value (&parser);
   if (gst_amf_node_get_type (node1) != GST_AMF_TYPE_STRING) {
@@ -924,7 +924,7 @@ gst_amf_parse_command (const guint8 * data, gsize size,
     g_ptr_array_add (args, node);
   }
 
-  GST_LOG ("Done parsing; consumed %" G_GSIZE_FORMAT " bytes and left %"
+  GST_TRACE ("Done parsing; consumed %" G_GSIZE_FORMAT " bytes and left %"
       G_GSIZE_FORMAT " bytes", parser.offset, parser.size - parser.offset);
 
   if (args->len == 0) {
@@ -1128,7 +1128,7 @@ gst_amf_serialize_command_valist (gdouble transaction_id,
     dump_argument (node, i++);
   }
 
-  GST_LOG ("Done serializing; consumed %u args and produced %u bytes", i,
+  GST_TRACE ("Done serializing; consumed %u args and produced %u bytes", i,
       array->len);
 
   return g_byte_array_free_to_bytes (array);
