@@ -690,14 +690,14 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
   gdouble transaction_id;
   GPtrArray *args;
   GList *l;
-  GstMapInfo map;
 
-  gst_buffer_map (buffer, &map, GST_MAP_READ);
-
-  args = gst_amf_parse_command (map.data, map.size, &transaction_id,
-      &command_name);
-
-  gst_buffer_unmap (buffer, &map);
+  {
+    GstMapInfo map;
+    gst_buffer_map (buffer, &map, GST_MAP_READ);
+    args = gst_amf_parse_command (map.data, map.size, &transaction_id,
+        &command_name);
+    gst_buffer_unmap (buffer, &map);
+  }
 
   if (!args) {
     return;
