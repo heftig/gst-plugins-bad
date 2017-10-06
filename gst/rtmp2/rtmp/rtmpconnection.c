@@ -58,7 +58,8 @@ struct _GstRtmpConnection
   GByteArray *input_bytes;
   guint input_needed_bytes;
   GstRtmpChunkStreams *input_streams, *output_streams;
-  GList *command_callbacks;
+  GList *transactions;
+  GList *expected_commands;
   guint transaction_count;
 
   GstRtmpConnectionMessageFunc input_handler;
@@ -116,23 +117,45 @@ gst_rtmp_connection_send_ping_response (GstRtmpConnection * connection,
 static void gst_rtmp_connection_send_window_size_request (GstRtmpConnection *
     connection);
 
-typedef struct _CommandCallback CommandCallback;
-struct _CommandCallback
+typedef struct
+{
+  gdouble transaction_id;
+  GstRtmpCommandCallback func;
+  gpointer user_data;
+} Transaction;
+
+static Transaction *
+transaction_new (gdouble transaction_id, GstRtmpCommandCallback func,
+    gpointer user_data)
+{
+  Transaction *data = g_slice_new (Transaction);
+  data->transaction_id = transaction_id;
+  data->func = func;
+  data->user_data = user_data;
+  return data;
+}
+
+static void
+transaction_free (gpointer ptr)
+{
+  Transaction *data = ptr;
+  g_slice_free (Transaction, data);
+}
+
+typedef struct
 {
   guint32 stream_id;
-  gdouble transaction_id;
   gchar *command_name;
   GstRtmpCommandCallback func;
   gpointer user_data;
-};
+} ExpectedCommand;
 
-static CommandCallback *
-command_callback_new (guint32 stream_id, gdouble transaction_id,
-    const gchar * command_name, GstRtmpCommandCallback func, gpointer user_data)
+static ExpectedCommand *
+expected_command_new (guint32 stream_id, const gchar * command_name,
+    GstRtmpCommandCallback func, gpointer user_data)
 {
-  CommandCallback *data = g_slice_new (CommandCallback);
+  ExpectedCommand *data = g_slice_new (ExpectedCommand);
   data->stream_id = stream_id;
-  data->transaction_id = transaction_id;
   data->command_name = g_strdup (command_name);
   data->func = func;
   data->user_data = user_data;
@@ -140,11 +163,11 @@ command_callback_new (guint32 stream_id, gdouble transaction_id,
 }
 
 static void
-command_callback_free (gpointer ptr)
+expected_command_free (gpointer ptr)
 {
-  CommandCallback *data = ptr;
+  ExpectedCommand *data = ptr;
   g_free (data->command_name);
-  g_slice_free (CommandCallback, data);
+  g_slice_free (ExpectedCommand, data);
 }
 
 enum
@@ -274,15 +297,24 @@ static void
 cancel_all_commands (GstRtmpConnection * self)
 {
   GList *l;
-  for (l = self->command_callbacks; l; l = g_list_next (l)) {
-    CommandCallback *cc = l->data;
-    GST_TRACE ("calling command callback %s",
+
+  for (l = self->transactions; l; l = g_list_next (l)) {
+    Transaction *cc = l->data;
+    GST_TRACE ("calling transaction callback %s",
         GST_DEBUG_FUNCPTR_NAME (cc->func));
     cc->func ("<cancelled>", NULL, cc->user_data);
   }
+  g_list_free_full (self->transactions, transaction_free);
+  self->transactions = NULL;
 
-  g_list_free_full (self->command_callbacks, command_callback_free);
-  self->command_callbacks = NULL;
+  for (l = self->expected_commands; l; l = g_list_next (l)) {
+    ExpectedCommand *cc = l->data;
+    GST_TRACE ("calling expected command callback %s",
+        GST_DEBUG_FUNCPTR_NAME (cc->func));
+    cc->func ("<cancelled>", NULL, cc->user_data);
+  }
+  g_list_free_full (self->expected_commands, expected_command_free);
+  self->expected_commands = NULL;
 }
 
 void
@@ -718,26 +750,37 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
       G_GUINT32_FORMAT, GST_STR_NULL (command_name), transaction_id,
       meta->size);
 
-  for (l = sc->command_callbacks; l; l = g_list_next (l)) {
-    CommandCallback *cc = l->data;
+  for (l = sc->transactions; l; l = g_list_next (l)) {
+    Transaction *t = l->data;
 
-    if (cc->stream_id != meta->mstream) {
+    if (t->transaction_id != transaction_id) {
       continue;
     }
 
-    if (cc->transaction_id != transaction_id) {
+    GST_TRACE ("calling transaction callback %s",
+        GST_DEBUG_FUNCPTR_NAME (t->func));
+    sc->transactions = g_list_remove_link (sc->transactions, l);
+    t->func (command_name, args, t->user_data);
+    g_list_free_full (l, transaction_free);
+    break;
+  }
+
+  for (l = sc->expected_commands; l; l = g_list_next (l)) {
+    ExpectedCommand *ec = l->data;
+
+    if (ec->stream_id != meta->mstream) {
       continue;
     }
 
-    if (cc->command_name && g_strcmp0 (cc->command_name, command_name)) {
+    if (g_strcmp0 (ec->command_name, command_name)) {
       continue;
     }
 
-    GST_TRACE ("calling command callback %s",
-        GST_DEBUG_FUNCPTR_NAME (cc->func));
-    sc->command_callbacks = g_list_remove_link (sc->command_callbacks, l);
-    cc->func (command_name, args, cc->user_data);
-    g_list_free_full (l, command_callback_free);
+    GST_TRACE ("calling expected command callback %s",
+        GST_DEBUG_FUNCPTR_NAME (ec->func));
+    sc->expected_commands = g_list_remove_link (sc->expected_commands, l);
+    ec->func (command_name, args, ec->user_data);
+    g_list_free_full (l, expected_command_free);
     break;
   }
 
@@ -825,18 +868,16 @@ gst_rtmp_connection_send_command (GstRtmpConnection * connection,
   }
 
   if (response_command) {
-    CommandCallback *cc;
+    Transaction *t;
 
     transaction_id = ++connection->transaction_count;
 
     GST_TRACE ("Registering %s for transid %.0f",
         GST_DEBUG_FUNCPTR_NAME (response_command), transaction_id);
 
-    cc = command_callback_new (stream_id, transaction_id, NULL,
-        response_command, user_data);
+    t = transaction_new (transaction_id, response_command, user_data);
 
-    connection->command_callbacks =
-        g_list_append (connection->command_callbacks, cc);
+    connection->transactions = g_list_append (connection->transactions, t);
   }
 
   va_start (ap, argument);
@@ -857,7 +898,7 @@ gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
     GstRtmpCommandCallback response_command, gpointer user_data,
     guint32 stream_id, const gchar * command_name)
 {
-  CommandCallback *cc;
+  ExpectedCommand *ec;
 
   g_return_if_fail (response_command);
   g_return_if_fail (command_name);
@@ -866,11 +907,11 @@ gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
       " name \"%s\"", GST_DEBUG_FUNCPTR_NAME (response_command),
       stream_id, command_name);
 
-  cc = command_callback_new (stream_id, 0, command_name, response_command,
+  ec = expected_command_new (stream_id, command_name, response_command,
       user_data);
 
-  connection->command_callbacks =
-      g_list_append (connection->command_callbacks, cc);
+  connection->expected_commands =
+      g_list_append (connection->expected_commands, ec);
 }
 
 static void
