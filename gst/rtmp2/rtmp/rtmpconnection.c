@@ -24,6 +24,7 @@
 
 #include <gst/gst.h>
 #include <string.h>
+#include <math.h>
 #include "rtmpconnection.h"
 #include "rtmpchunkstream.h"
 #include "rtmpmessage.h"
@@ -702,7 +703,8 @@ gst_rtmp_connection_handle_cm (GstRtmpConnection * sc, GstBuffer * buffer)
     return;
   }
 
-  if (transaction_id < 0 || transaction_id > G_MAXUINT) {
+  if (!isfinite (transaction_id) || transaction_id < 0 ||
+      transaction_id > G_MAXUINT) {
     GST_WARNING ("Server sent extreme transaction id %.0f", transaction_id);
   } else if (transaction_id > sc->transaction_count) {
     GST_WARNING ("Server sent command with unused transaction ID (%.0f > %u)",

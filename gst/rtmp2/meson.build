@@ -16,7 +16,7 @@ gstrtmp2 = library('gstrtmp2',
   rtmp2_sources,
   c_args : gst_plugins_bad_args,
   include_directories : [configinc, libsinc],
-  dependencies : [gstbase_dep, gio_dep],
+  dependencies : [gstbase_dep, gio_dep, libm],
   install : true,
   install_dir : plugins_install_dir,
 )
