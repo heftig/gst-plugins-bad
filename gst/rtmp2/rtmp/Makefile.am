@@ -18,6 +18,7 @@ libgstrtmp2_rtmp_la_CFLAGS = \
 libgstrtmp2_rtmp_la_LIBADD = \
 	$(GST_LIBS) \
 	$(GIO_LIBS) \
+	$(LIBM) \
 	$(NULL)
 
 libgstrtmp2_rtmp_la_LDFLAGS = -module -avoid-version
