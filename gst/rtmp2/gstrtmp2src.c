@@ -70,7 +70,7 @@ typedef struct
   GMainLoop *loop;
   GMainContext *context;
 
-  GTask *connector;
+  GCancellable *cancellable;
   GstRtmpConnection *connection;
   guint32 stream_id;
 
@@ -378,7 +378,7 @@ gst_rtmp2_src_finalize (GObject * object)
 
   gst_buffer_replace (&self->message, NULL);
 
-  g_clear_object (&self->connector);
+  g_clear_object (&self->cancellable);
   g_clear_object (&self->connection);
 
   g_clear_object (&self->task);
@@ -396,7 +396,6 @@ static gboolean
 gst_rtmp2_src_start (GstBaseSrc * src)
 {
   GstRtmp2Src *self = GST_RTMP2_SRC (src);
-  GCancellable *cancellable = g_cancellable_new ();
   gboolean async;
 
   GST_OBJECT_LOCK (self);
@@ -405,8 +404,10 @@ gst_rtmp2_src_start (GstBaseSrc * src)
 
   GST_INFO_OBJECT (self, "Starting (%s)", async ? "async" : "delayed");
 
+  g_clear_object (&self->cancellable);
+
   self->running = TRUE;
-  self->connector = g_task_new (self, cancellable, connect_task_done, NULL);
+  self->cancellable = g_cancellable_new ();
   self->stream_id = 0;
   self->sent_header = FALSE;
   self->last_ts = GST_CLOCK_TIME_NONE;
@@ -415,7 +416,6 @@ gst_rtmp2_src_start (GstBaseSrc * src)
     gst_task_start (self->task);
   }
 
-  g_object_unref (cancellable);
   return TRUE;
 }
 
@@ -432,9 +432,9 @@ stop_task (GstRtmp2Src * self)
   gst_task_stop (self->task);
   self->running = FALSE;
 
-  if (self->connector) {
-    GST_DEBUG_OBJECT (self, "Cancelling connector");
-    g_cancellable_cancel (g_task_get_cancellable (self->connector));
+  if (self->cancellable) {
+    GST_DEBUG_OBJECT (self, "Cancelling");
+    g_cancellable_cancel (self->cancellable);
   }
 
   if (self->loop) {
@@ -593,6 +593,7 @@ gst_rtmp2_src_task_func (gpointer user_data)
   GstRtmp2Src *self = GST_RTMP2_SRC (user_data);
   GMainContext *context;
   GMainLoop *loop;
+  GTask *connector;
 
   GST_DEBUG_OBJECT (self, "gst_rtmp2_src_task starting");
 
@@ -600,10 +601,10 @@ gst_rtmp2_src_task_func (gpointer user_data)
   context = self->context = g_main_context_new ();
   g_main_context_push_thread_default (context);
   loop = self->loop = g_main_loop_new (context, TRUE);
+  connector = g_task_new (self, self->cancellable, connect_task_done, NULL);
   GST_OBJECT_LOCK (self);
-  gst_rtmp_client_connect_async (&self->location,
-      g_task_get_cancellable (self->connector), client_connect_done,
-      self->connector);
+  gst_rtmp_client_connect_async (&self->location, self->cancellable,
+      client_connect_done, connector);
   GST_OBJECT_UNLOCK (self);
   g_mutex_unlock (&self->lock);
 
@@ -738,8 +739,8 @@ static void
 error_callback (GstRtmpConnection * connection, GstRtmp2Src * self)
 {
   g_mutex_lock (&self->lock);
-  if (self->connector) {
-    g_cancellable_cancel (g_task_get_cancellable (self->connector));
+  if (self->cancellable) {
+    g_cancellable_cancel (self->cancellable);
   } else if (self->loop) {
     GST_INFO_OBJECT (self, "Connection error");
     stop_task (self);
@@ -802,10 +803,12 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
 
   g_mutex_lock (&self->lock);
 
-  g_warn_if_fail (self->connector == task);
   g_warn_if_fail (g_task_is_valid (task, object));
 
-  self->connector = NULL;
+  if (self->cancellable == g_task_get_cancellable (task)) {
+    g_clear_object (&self->cancellable);
+  }
+
   self->connection = g_task_propagate_pointer (task, &error);
   if (self->connection) {
     gst_rtmp_connection_set_input_handler (self->connection,
