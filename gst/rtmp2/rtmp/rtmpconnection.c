@@ -889,6 +889,9 @@ gst_rtmp_connection_send_command (GstRtmpConnection * connection,
     GST_ERROR ("Called from wrong thread");
   }
 
+  GST_DEBUG ("Sending command '%s' on stream id %" G_GUINT32_FORMAT,
+      command_name, stream_id);
+
   if (response_command) {
     Transaction *t;
 

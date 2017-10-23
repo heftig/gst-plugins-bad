@@ -547,6 +547,7 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
 
     if (authmod == GST_RTMP_AUTHMOD_AUTO && strstr (desc, "code=403 need auth")) {
       if (strstr (desc, "authmod=adobe")) {
+        GST_INFO ("Reconnecting with authmod=adobe");
         data->location.authmod = GST_RTMP_AUTHMOD_ADOBE;
         socket_connect (task);
         return;
