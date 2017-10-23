@@ -132,6 +132,8 @@ typedef struct {
 gboolean gst_rtmp_message_parse_user_control (GstBuffer * buffer,
     GstRtmpUserControl * out);
 
+GstBuffer * gst_rtmp_message_new_user_control (GstRtmpUserControl * uc);
+
 G_END_DECLS
 
 #endif

@@ -466,3 +466,24 @@ err:
   gst_buffer_unmap (buffer, &map);
   return ret;
 }
+
+GstBuffer *
+gst_rtmp_message_new_user_control (GstRtmpUserControl * uc)
+{
+  guint8 *data;
+  gsize size;
+
+  g_return_val_if_fail (uc, NULL);
+
+  size = uc_has_param2 (uc->type) ? 10 : 6;
+
+  data = g_malloc (size);
+  GST_WRITE_UINT16_BE (data, uc->type);
+  GST_WRITE_UINT32_BE (data + 2, uc->param);
+  if (uc_has_param2 (uc->type)) {
+    GST_WRITE_UINT32_BE (data + 6, uc->param2);
+  }
+
+  return gst_rtmp_message_new_wrapped (GST_RTMP_MESSAGE_TYPE_USER_CONTROL,
+      GST_RTMP_CHUNK_STREAM_PROTOCOL, 0, data, size);
+}

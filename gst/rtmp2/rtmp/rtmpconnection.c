@@ -966,30 +966,23 @@ static void
 gst_rtmp_connection_send_ping_response (GstRtmpConnection * connection,
     guint32 event_data)
 {
-  GstBuffer *buffer;
-  guint8 *data;
+  GstRtmpUserControl uc = {
+    .type = GST_RTMP_USER_CONTROL_TYPE_PING_RESPONSE,
+    .param = event_data,
+  };
 
-  data = g_malloc (6);
-  GST_WRITE_UINT16_BE (data, GST_RTMP_USER_CONTROL_TYPE_PING_RESPONSE);
-  GST_WRITE_UINT32_BE (data + 2, event_data);
-
-  buffer = gst_rtmp_message_new_wrapped (GST_RTMP_MESSAGE_TYPE_USER_CONTROL,
-      2, 0, data, 6);
-
-  gst_rtmp_connection_queue_message (connection, buffer);
+  gst_rtmp_connection_queue_message (connection,
+      gst_rtmp_message_new_user_control (&uc));
 }
 
 static void
 gst_rtmp_connection_send_window_size_request (GstRtmpConnection * connection)
 {
-  GstBuffer *buffer;
-  guint8 *data;
+  GstRtmpUserControl uc = {
+    .type = GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE,
+    .param = connection->peer_bandwidth,
+  };
 
-  data = g_malloc (4);
-  GST_WRITE_UINT32_BE (data, connection->peer_bandwidth);
-
-  buffer = gst_rtmp_message_new_wrapped (GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE,
-      2, 0, data, 4);
-
-  gst_rtmp_connection_queue_message (connection, buffer);
+  gst_rtmp_connection_queue_message (connection,
+      gst_rtmp_message_new_user_control (&uc));
 }
