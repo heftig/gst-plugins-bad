@@ -55,6 +55,10 @@ typedef enum
   GST_RTMP_USER_CONTROL_TYPE_STREAM_IS_RECORDED = 4,
   GST_RTMP_USER_CONTROL_TYPE_PING_REQUEST = 6,
   GST_RTMP_USER_CONTROL_TYPE_PING_RESPONSE = 7,
+
+  /* undocumented */
+  GST_RTMP_USER_CONTROL_TYPE_BUFFER_EMPTY = 31,
+  GST_RTMP_USER_CONTROL_TYPE_BUFFER_READY = 32,
 } GstRtmpUserControlType;
 
 const gchar * gst_rtmp_user_control_type_get_nick (
