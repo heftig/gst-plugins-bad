@@ -53,6 +53,22 @@ gst_rtmp_message_type_is_valid (GstRtmpMessageType type)
   }
 }
 
+gboolean
+gst_rtmp_message_type_is_protocol_control (GstRtmpMessageType type)
+{
+  switch (type) {
+    case GST_RTMP_MESSAGE_TYPE_SET_CHUNK_SIZE:
+    case GST_RTMP_MESSAGE_TYPE_ABORT_MESSAGE:
+    case GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT:
+    case GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE:
+    case GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH:
+      return TRUE;
+
+    default:
+      return FALSE;
+  }
+}
+
 const gchar *
 gst_rtmp_message_type_get_nick (GstRtmpMessageType type)
 {
@@ -282,48 +298,54 @@ gboolean
 gst_rtmp_message_is_protocol_control (GstBuffer * buffer)
 {
   GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (buffer);
-  g_return_val_if_fail (meta, FALSE);
-  switch (meta->type) {
-    case GST_RTMP_MESSAGE_TYPE_SET_CHUNK_SIZE:
-    case GST_RTMP_MESSAGE_TYPE_ABORT_MESSAGE:
-    case GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT:
-    case GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE:
-    case GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH:
-      if (meta->cstream != GST_RTMP_CHUNK_STREAM_PROTOCOL) {
-        GST_WARNING ("Protocol control message on chunk stream %"
-            G_GUINT32_FORMAT ", not 2", meta->cstream);
-      }
-      if (meta->mstream != 0) {
-        GST_WARNING ("Protocol control message on message stream %"
-            G_GUINT32_FORMAT ", not 0", meta->mstream);
-      }
-      return TRUE;
 
-    default:
-      return FALSE;
+  g_return_val_if_fail (meta, FALSE);
+
+  if (!gst_rtmp_message_type_is_protocol_control (meta->type)) {
+    return FALSE;
   }
+
+  if (meta->cstream != GST_RTMP_CHUNK_STREAM_PROTOCOL) {
+    GST_WARNING ("Protocol control message on chunk stream %"
+        G_GUINT32_FORMAT ", not 2", meta->cstream);
+  }
+
+  if (meta->mstream != 0) {
+    GST_WARNING ("Protocol control message on message stream %"
+        G_GUINT32_FORMAT ", not 0", meta->mstream);
+  }
+
+  return TRUE;
 }
 
 gboolean
 gst_rtmp_message_is_user_control (GstBuffer * buffer)
 {
   GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (buffer);
-  g_return_val_if_fail (meta, FALSE);
-  switch (meta->type) {
-    case GST_RTMP_MESSAGE_TYPE_USER_CONTROL:
-      if (meta->cstream != GST_RTMP_CHUNK_STREAM_PROTOCOL) {
-        GST_WARNING ("User control message on chunk stream %"
-            G_GUINT32_FORMAT ", not 2", meta->cstream);
-      }
-      if (meta->mstream != 0) {
-        GST_WARNING ("User control message on message stream %"
-            G_GUINT32_FORMAT ", not 0", meta->mstream);
-      }
-      return TRUE;
 
-    default:
-      return FALSE;
+  g_return_val_if_fail (meta, FALSE);
+
+  if (meta->type != GST_RTMP_MESSAGE_TYPE_USER_CONTROL) {
+    return FALSE;
   }
+
+  if (meta->cstream != GST_RTMP_CHUNK_STREAM_PROTOCOL) {
+    GST_WARNING ("User control message on chunk stream %"
+        G_GUINT32_FORMAT ", not 2", meta->cstream);
+  }
+
+  if (meta->mstream != 0) {
+    GST_WARNING ("User control message on message stream %"
+        G_GUINT32_FORMAT ", not 0", meta->mstream);
+  }
+
+  return TRUE;
+}
+
+static inline gboolean
+pc_has_param2 (GstRtmpMessageType type)
+{
+  return type == GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH;
 }
 
 gboolean
@@ -337,6 +359,8 @@ gst_rtmp_message_parse_protocol_control (GstBuffer * buffer,
   gboolean ret = FALSE;
 
   g_return_val_if_fail (meta, FALSE);
+  g_return_val_if_fail (gst_rtmp_message_type_is_protocol_control (meta->type),
+      FALSE);
 
   if (!gst_buffer_map (buffer, &map, GST_MAP_READ)) {
     GST_ERROR ("can't map protocol control message");
@@ -344,9 +368,7 @@ gst_rtmp_message_parse_protocol_control (GstBuffer * buffer,
   }
 
   pc.type = meta->type;
-  if (pc.type == GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH) {
-    pc_size = 5;
-  }
+  pc_size = pc_has_param2 (pc.type) ? 5 : 4;
 
   if (map.size < pc_size) {
     GST_ERROR ("can't read protocol control param");
@@ -356,10 +378,8 @@ gst_rtmp_message_parse_protocol_control (GstBuffer * buffer,
         G_GSIZE_FORMAT, map.size, pc_size);
   }
 
-  if (pc.type == GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH) {
-    pc.param2 = GST_READ_UINT8 (map.data + 4);
-  }
   pc.param = GST_READ_UINT32_BE (map.data);
+  pc.param2 = pc_has_param2 (pc.type) ? GST_READ_UINT8 (map.data + 4) : 0;
 
   ret = TRUE;
   if (out) {
@@ -371,6 +391,12 @@ err:
   return ret;
 }
 
+static inline gboolean
+uc_has_param2 (GstRtmpUserControlType type)
+{
+  return type == GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH;
+}
+
 gboolean
 gst_rtmp_message_parse_user_control (GstBuffer * buffer,
     GstRtmpUserControl * out)
@@ -378,7 +404,7 @@ gst_rtmp_message_parse_user_control (GstBuffer * buffer,
   GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (buffer);
   GstMapInfo map;
   GstRtmpUserControl uc;
-  gsize uc_size = 6;
+  gsize uc_size;
   gboolean ret = FALSE;
 
   g_return_val_if_fail (meta, FALSE);
@@ -396,9 +422,7 @@ gst_rtmp_message_parse_user_control (GstBuffer * buffer,
   }
 
   uc.type = GST_READ_UINT16_BE (map.data);
-  if (uc.type == GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH) {
-    uc_size = 10;
-  }
+  uc_size = uc_has_param2 (uc.type) ? 10 : 6;
 
   if (map.size < uc_size) {
     GST_ERROR ("can't read user control param");
@@ -408,10 +432,8 @@ gst_rtmp_message_parse_user_control (GstBuffer * buffer,
         G_GSIZE_FORMAT, map.size, uc_size);
   }
 
-  if (uc.type == GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH) {
-    uc.param2 = GST_READ_UINT32_BE (map.data + 6);
-  }
   uc.param = GST_READ_UINT32_BE (map.data + 2);
+  uc.param2 = uc_has_param2 (uc.type) ? GST_READ_UINT32_BE (map.data + 6) : 0;
 
   ret = TRUE;
   if (out) {

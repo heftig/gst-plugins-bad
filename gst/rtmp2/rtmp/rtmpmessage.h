@@ -44,6 +44,7 @@ typedef enum {
 } GstRtmpMessageType;
 
 gboolean gst_rtmp_message_type_is_valid (GstRtmpMessageType type);
+gboolean gst_rtmp_message_type_is_protocol_control (GstRtmpMessageType type);
 const gchar * gst_rtmp_message_type_get_nick (GstRtmpMessageType type);
 
 typedef enum
