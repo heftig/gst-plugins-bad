@@ -31,7 +31,6 @@ typedef struct _GstRtmpChunkStream GstRtmpChunkStream;
 typedef struct _GstRtmpChunkStreams GstRtmpChunkStreams;
 
 void gst_rtmp_chunk_stream_clear (GstRtmpChunkStream * cstream);
-gboolean gst_rtmp_chunk_stream_is_pcm (GstRtmpChunkStream * cstream);
 
 guint32 gst_rtmp_chunk_stream_parse_id (const guint8 * data, gsize size);
 guint32 gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
