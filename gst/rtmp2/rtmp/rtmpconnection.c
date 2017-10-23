@@ -707,6 +707,14 @@ gst_rtmp_connection_handle_user_control (GstRtmpConnection * connection,
       GST_DEBUG ("ignoring ping response: %" G_GUINT32_FORMAT, uc.param);
       break;
 
+    case GST_RTMP_USER_CONTROL_TYPE_BUFFER_EMPTY:
+      GST_LOG ("ignoring buffer empty: %" G_GUINT32_FORMAT, uc.param);
+      break;
+
+    case GST_RTMP_USER_CONTROL_TYPE_BUFFER_READY:
+      GST_LOG ("ignoring buffer ready: %" G_GUINT32_FORMAT, uc.param);
+      break;
+
     default:
       GST_ERROR ("unimplemented user control type %d:%s", uc.type,
           gst_rtmp_user_control_type_get_nick (uc.type));

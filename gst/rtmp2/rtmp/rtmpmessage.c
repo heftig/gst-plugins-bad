@@ -112,6 +112,10 @@ gst_rtmp_user_control_type_get_nick (GstRtmpUserControlType type)
       return "ping-request";
     case GST_RTMP_USER_CONTROL_TYPE_PING_RESPONSE:
       return "ping-response";
+    case GST_RTMP_USER_CONTROL_TYPE_BUFFER_EMPTY:
+      return "buffer-empty";
+    case GST_RTMP_USER_CONTROL_TYPE_BUFFER_READY:
+      return "buffer-ready";
     default:
       return "unknown";
   }
