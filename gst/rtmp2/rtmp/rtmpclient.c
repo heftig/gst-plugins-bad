@@ -27,6 +27,7 @@
 #include <string.h>
 #include "rtmpclient.h"
 #include "rtmphandshake.h"
+#include "rtmpmessage.h"
 #include "rtmputils.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_client_debug_category);
@@ -863,6 +864,32 @@ gst_rtmp_client_start_play_async (GstRtmpConnection * connection,
 }
 
 static void
+send_window_size_request (GstRtmpConnection * connection, guint32 bytes)
+{
+  GstRtmpUserControl uc = {
+    .type = GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE,
+    .param = bytes,
+  };
+
+  gst_rtmp_connection_queue_message (connection,
+      gst_rtmp_message_new_user_control (&uc));
+}
+
+static void
+send_set_buffer_length (GstRtmpConnection * connection, guint32 stream,
+    guint32 ms)
+{
+  GstRtmpUserControl uc = {
+    .type = GST_RTMP_USER_CONTROL_TYPE_SET_BUFFER_LENGTH,
+    .param = stream,
+    .param2 = ms,
+  };
+
+  gst_rtmp_connection_queue_message (connection,
+      gst_rtmp_message_new_user_control (&uc));
+}
+
+static void
 send_create_stream (GTask * task)
 {
   GstRtmpConnection *connection = g_task_get_source_object (task);
@@ -879,6 +906,10 @@ send_create_stream (GTask * task)
         "releaseStream", command_object, stream_name, NULL);
     gst_rtmp_connection_send_command (connection, NULL, NULL, 0,
         "FCPublish", command_object, stream_name, NULL);
+  } else {
+    /* Matches librtmp */
+    send_window_size_request (connection, 2500000);
+    send_set_buffer_length (connection, 0, 300);
   }
 
   GST_INFO ("Creating stream '%s'", data->stream);
@@ -962,6 +993,11 @@ send_publish_or_play (GTask * task)
       task, data->id, "onStatus");
   gst_rtmp_connection_send_command (connection, NULL, NULL, data->id,
       command, command_object, stream_name, argument, NULL);
+
+  if (!data->publish) {
+    /* Matches librtmp */
+    send_set_buffer_length (connection, data->id, 30000);
+  }
 
   gst_amf_node_free (command_object);
   gst_amf_node_free (stream_name);
