@@ -403,6 +403,10 @@ do_adobe_auth (const gchar * username, const gchar * password,
   gchar *challenge2, *auth_query;
   GChecksum *md5;
 
+  g_return_val_if_fail (username, NULL);
+  g_return_val_if_fail (password, NULL);
+  g_return_val_if_fail (salt, NULL);
+
   md5 = g_checksum_new (G_CHECKSUM_MD5);
   g_checksum_update (md5, (guchar *) username, -1);
   g_checksum_update (md5, (guchar *) salt, -1);
@@ -475,6 +479,21 @@ send_connect (GTask * task)
   } else if (data->location.authmod == GST_RTMP_AUTHMOD_ADOBE) {
     const gchar *user = data->location.username;
     const gchar *authmod = "adobe";
+
+    if (!user) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+          "no username for adobe authentication");
+      g_object_unref (task);
+      return;
+    }
+
+    if (!data->location.password) {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+          "no password for adobe authentication");
+      g_object_unref (task);
+      return;
+    }
+
     appstr = g_strdup_printf ("%s?authmod=%s&user=%s", app, authmod, user);
     uristr = g_strdup_printf ("%s?authmod=%s&user=%s", uri, authmod, user);
   } else {
