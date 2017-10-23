@@ -229,7 +229,8 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   }
 
   g_object_set (self, "scheme", scheme, "host", host, "port", port,
-      "application", application, "stream", stream, NULL);
+      "application", application, "stream", stream, "username", NULL,
+      "password", NULL, NULL);
 
   g_free (application);
   g_free (stream);
