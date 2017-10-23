@@ -391,6 +391,28 @@ err:
   return ret;
 }
 
+GstBuffer *
+gst_rtmp_message_new_protocol_control (GstRtmpProtocolControl * pc)
+{
+  guint8 *data;
+  gsize size;
+
+  g_return_val_if_fail (pc, NULL);
+  g_return_val_if_fail (gst_rtmp_message_type_is_protocol_control (pc->type),
+      NULL);
+
+  size = pc_has_param2 (pc->type) ? 5 : 4;
+
+  data = g_malloc (size);
+  GST_WRITE_UINT32_BE (data, pc->param);
+  if (pc_has_param2 (pc->type)) {
+    GST_WRITE_UINT32_BE (data + 4, pc->param2);
+  }
+
+  return gst_rtmp_message_new_wrapped (pc->type,
+      GST_RTMP_CHUNK_STREAM_PROTOCOL, 0, data, size);
+}
+
 static inline gboolean
 uc_has_param2 (GstRtmpUserControlType type)
 {

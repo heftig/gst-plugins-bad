@@ -116,6 +116,8 @@ typedef struct {
 gboolean gst_rtmp_message_parse_protocol_control (GstBuffer * buffer,
     GstRtmpProtocolControl * out);
 
+GstBuffer * gst_rtmp_message_new_protocol_control (GstRtmpProtocolControl * pc);
+
 typedef struct {
   GstRtmpUserControlType type;
 

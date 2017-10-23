@@ -951,16 +951,13 @@ gst_rtmp_connection_expect_command (GstRtmpConnection * connection,
 static void
 gst_rtmp_connection_send_ack (GstRtmpConnection * connection)
 {
-  GstBuffer *buffer;
-  guint8 *data;
+  GstRtmpProtocolControl pc = {
+    .type = GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT,
+    .param = (guint32) connection->total_input_bytes,
+  };
 
-  data = g_malloc (4);
-  GST_WRITE_UINT32_BE (data, connection->total_input_bytes);
-
-  buffer = gst_rtmp_message_new_wrapped (GST_RTMP_MESSAGE_TYPE_ACKNOWLEDGEMENT,
-      2, 0, data, 4);
-
-  gst_rtmp_connection_queue_message (connection, buffer);
+  gst_rtmp_connection_queue_message (connection,
+      gst_rtmp_message_new_protocol_control (&pc));
 
   connection->bytes_since_ack = 0;
 }
