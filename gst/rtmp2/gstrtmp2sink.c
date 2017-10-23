@@ -198,6 +198,7 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
 static void
 gst_rtmp2_sink_init (GstRtmp2Sink * self)
 {
+  self->location.flash_ver = g_strdup ("FMLE/3.0 (compatible; FMSc/1.0)");
   self->async_connect = TRUE;
 
   g_mutex_init (&self->lock);

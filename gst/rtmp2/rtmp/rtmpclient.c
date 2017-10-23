@@ -170,6 +170,7 @@ gst_rtmp_location_copy (GstRtmpLocation * dest, const GstRtmpLocation * src)
   dest->authmod = src->authmod;
   dest->timeout = src->timeout;
   dest->tls_flags = src->tls_flags;
+  dest->flash_ver = g_strdup (src->flash_ver);
 }
 
 void
@@ -184,6 +185,7 @@ gst_rtmp_location_clear (GstRtmpLocation * location)
   g_clear_pointer (&location->username, g_free);
   g_clear_pointer (&location->password, g_free);
   g_clear_pointer (&location->secure_token, g_free);
+  g_clear_pointer (&location->flash_ver, g_free);
 }
 
 gchar *
@@ -454,12 +456,17 @@ send_connect (GTask * task)
 {
   ConnectTaskData *data = g_task_get_task_data (task);
   GstAmfNode *node;
-  const gchar *app;
+  const gchar *app, *flash_ver;
   gchar *uri, *appstr = NULL, *uristr = NULL;
 
   node = gst_amf_node_new_object ();
   app = data->location.application;
+  flash_ver = data->location.flash_ver;
   uri = gst_rtmp_location_get_string (&data->location, FALSE);
+
+  if (!flash_ver) {
+    flash_ver = "LNX 10,0,32,18";
+  }
 
   if (data->auth_query) {
     const gchar *query = data->auth_query;
@@ -478,7 +485,7 @@ send_connect (GTask * task)
   gst_amf_node_append_field_take_string (node, g_strdup ("app"), appstr, -1);
   gst_amf_node_append_field_take_string (node, g_strdup ("tcUrl"), uristr, -1);
   gst_amf_node_append_field_string (node, "type", "nonprivate", -1);
-  gst_amf_node_append_field_string (node, "flashVer", "FMLE/3.0", -1);
+  gst_amf_node_append_field_string (node, "flashVer", flash_ver, -1);
 
   gst_rtmp_connection_send_command (data->connection, send_connect_done,
       task, 0, "connect", node, NULL);

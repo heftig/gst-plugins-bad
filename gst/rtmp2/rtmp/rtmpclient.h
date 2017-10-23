@@ -67,6 +67,7 @@ typedef struct _GstRtmpLocation
   GstRtmpAuthmod authmod;
   gint timeout;
   GTlsCertificateFlags tls_flags;
+  gchar *flash_ver;
 } GstRtmpLocation;
 
 void gst_rtmp_location_copy (GstRtmpLocation * dest,
