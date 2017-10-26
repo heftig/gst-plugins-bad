@@ -691,6 +691,7 @@ got_message (GstRtmpConnection * connection, GstBuffer * buffer,
 {
   GstRtmp2Src *self = GST_RTMP2_SRC (user_data);
   GstRtmpMeta *meta = gst_buffer_get_rtmp_meta (buffer);
+  guint32 min_size = 1;
 
   g_return_if_fail (meta);
 
@@ -701,15 +702,15 @@ got_message (GstRtmpConnection * connection, GstBuffer * buffer,
     return;
   }
 
-  if (meta->size == 0) {
-    GST_DEBUG_OBJECT (self, "Ignoring empty %s message",
-        gst_rtmp_message_type_get_nick (meta->type));
-    return;
-  }
-
   switch (meta->type) {
     case GST_RTMP_MESSAGE_TYPE_VIDEO:
+      min_size = 6;
+      break;
+
     case GST_RTMP_MESSAGE_TYPE_AUDIO:
+      min_size = 2;
+      break;
+
     case GST_RTMP_MESSAGE_TYPE_DATA_AMF0:
       break;
 
@@ -717,6 +718,13 @@ got_message (GstRtmpConnection * connection, GstBuffer * buffer,
       GST_DEBUG_OBJECT (self, "Ignoring %s message, wrong type",
           gst_rtmp_message_type_get_nick (meta->type));
       return;
+  }
+
+  if (meta->size < min_size) {
+    GST_DEBUG_OBJECT (self, "Ignoring too small %s message (%" G_GUINT32_FORMAT
+        " < %" G_GUINT32_FORMAT, gst_rtmp_message_type_get_nick (meta->type),
+        meta->size, min_size);
+    return;
   }
 
   g_mutex_lock (&self->lock);
