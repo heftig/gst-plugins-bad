@@ -679,73 +679,125 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
   g_object_unref (task);
 }
 
-/* taken from librtmp */
-static gchar *
-rtmp_tea_decode (const gchar * key, const gchar * text)
+/* prep key: pack 1st 16 chars into 4 LittleEndian ints */
+static void
+rtmp_tea_decode_prep_key (const gchar * key, guint32 out[4])
 {
-  guint32 *v, k[4] = { 0 }, u;
-  guint32 z, y, sum = 0, e, DELTA = 0x9e3779b9;
-  gint32 p, q;
-  gint i, n;
-  guchar *ptr, *out;
+  gchar copy[16];
 
-  /* prep key: pack 1st 16 chars into 4 LittleEndian ints */
-  ptr = (guchar *) key;
-  u = 0;
-  n = 0;
-  v = k;
-  p = strlen (key) > 16 ? 16 : strlen (key);
-  for (i = 0; i < p; i++) {
-    u |= ptr[i] << (n * 8);
-    if (n == 3) {
-      *v++ = u;
-      u = 0;
-      n = 0;
-    } else {
-      n++;
+  g_return_if_fail (key);
+  g_return_if_fail (out);
+
+  /* ensure we can read 16 bytes */
+  strncpy (copy, key, 16);
+
+  out[0] = GST_READ_UINT32_LE (copy);
+  out[1] = GST_READ_UINT32_LE (copy + 4);
+  out[2] = GST_READ_UINT32_LE (copy + 8);
+  out[3] = GST_READ_UINT32_LE (copy + 12);
+}
+
+/* prep text: hex2bin, each 8 digits -> 4 chars -> 1 uint32 */
+static GArray *
+rtmp_tea_decode_prep_text (const gchar * text)
+{
+  GArray *arr;
+  gsize len, i;
+
+  g_return_val_if_fail (text, NULL);
+
+  len = strlen (text);
+  arr = g_array_sized_new (TRUE, TRUE, 4, (len + 7) / 8);
+
+  for (i = 0; i < len; i += 8) {
+    gchar copy[8];
+    guchar chars[4];
+    gsize j;
+    guint32 val;
+
+    /* ensure we can read 8 bytes */
+    strncpy (copy, text + i, 8);
+
+    for (j = 0; j < 4; j++) {
+      gint hi, lo;
+
+      hi = g_ascii_xdigit_value (copy[2 * j]);
+      lo = g_ascii_xdigit_value (copy[2 * j + 1]);
+
+      chars[j] = (hi > 0 ? hi << 4 : 0) + (lo > 0 ? lo : 0);
     }
-  }
-  /* any trailing chars */
-  if (u)
-    *v = u;
 
-  /* prep text: hex2bin, multiples of 4 */
-  n = (strlen (text) + 7) / 8;
-  out = g_malloc (n * 8);
-  ptr = (guchar *) text;
-  v = (guint32 *) out;
-  for (i = 0; i < n; i++) {
-    u = (g_ascii_xdigit_value (ptr[0]) << 4) + g_ascii_xdigit_value (ptr[1]);
-    u |= ((g_ascii_xdigit_value (ptr[2]) << 4) +
-        g_ascii_xdigit_value (ptr[3])) << 8;
-    u |= ((g_ascii_xdigit_value (ptr[4]) << 4) +
-        g_ascii_xdigit_value (ptr[5])) << 16;
-    u |= ((g_ascii_xdigit_value (ptr[6]) << 4) +
-        g_ascii_xdigit_value (ptr[7])) << 24;
-    *v++ = u;
-    ptr += 8;
+    val = GST_READ_UINT32_LE (chars);
+    g_array_append_val (arr, val);
   }
-  v = (guint32 *) out;
 
-  /* http://www.movable-type.co.uk/scripts/tea-block.html */
+  return arr;
+}
+
+/* return text from uint32s to chars */
+static gchar *
+rtmp_tea_decode_return_text (GArray * arr)
+{
+#if G_BYTE_ORDER != G_LITTLE_ENDIAN
+  gsize i;
+
+  g_return_val_if_fail (arr, NULL);
+
+  for (i = 0; i < arr->len; i++) {
+    guint32 *val = &g_array_index (arr, guint32, i);
+    *val = GUINT32_TO_LE (*val);
+  }
+#endif
+
+  /* array is alredy zero-terminated */
+  return g_array_free (arr, FALSE);
+}
+
+/* http://www.movable-type.co.uk/scripts/tea-block.html */
+static void
+rtmp_tea_decode_btea (GArray * text, guint32 key[4])
+{
+  guint32 *v, n, *k;
+  guint32 z, y, sum = 0, e, DELTA = 0x9e3779b9;
+  guint32 p, q;
+
+  g_return_if_fail (text);
+  g_return_if_fail (text->len > 0);
+  g_return_if_fail (key);
+
+  v = (guint32 *) text->data;
+  n = text->len;
+  k = key;
   z = v[n - 1];
   y = v[0];
   q = 6 + 52 / n;
   sum = q * DELTA;
+
+#define MX ((z>>5^y<<2) + (y>>3^z<<4)) ^ ((sum^y) + (k[(p&3)^e]^z));
+
   while (sum != 0) {
     e = sum >> 2 & 3;
     for (p = n - 1; p > 0; p--)
-      z = v[p - 1], y = v[p] -=
-          (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) ^ ((sum ^ y) +
-          (k[(p & 3) ^ e] ^ z));
+      z = v[p - 1], y = v[p] -= MX;
     z = v[n - 1];
-    y = v[0] -=
-        (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) ^ ((sum ^ y) +
-        (k[(p & 3) ^ e] ^ z));
+    y = v[0] -= MX;
     sum -= DELTA;
   }
 
-  return (gchar *) out;
+#undef MX
+}
+
+/* taken from librtmp */
+static gchar *
+rtmp_tea_decode (const gchar * bin_key, const gchar * hex_text)
+{
+  guint32 key[4];
+  GArray *text;
+
+  rtmp_tea_decode_prep_key (bin_key, key);
+  text = rtmp_tea_decode_prep_text (hex_text);
+  rtmp_tea_decode_btea (text, key);
+  return rtmp_tea_decode_return_text (text);
 }
 
 static void
