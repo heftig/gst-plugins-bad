@@ -4,6 +4,9 @@
 - Move AMF parser/serializer to GstRtmpMeta?
 - Move AMF nodes from g_slice to GstMiniObject?
 
+- First video frame that comes from Wowza seems to be out-of-order; librtmp
+  does not have this problem
+
 - Refactor connection, pull out the ad-hoc read and write handling and put it
   with the chunk layer into GBuffered{In,Out}putStream subclasses
 
