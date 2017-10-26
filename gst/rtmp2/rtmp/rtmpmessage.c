@@ -128,6 +128,10 @@ gst_rtmp_user_control_type_get_nick (GstRtmpUserControlType type)
       return "ping-request";
     case GST_RTMP_USER_CONTROL_TYPE_PING_RESPONSE:
       return "ping-response";
+    case GST_RTMP_USER_CONTROL_TYPE_SWF_VERIFICATION_REQUEST:
+      return "swf-verification-request";
+    case GST_RTMP_USER_CONTROL_TYPE_SWF_VERIFICATION_RESPONSE:
+      return "swf-verification-response";
     case GST_RTMP_USER_CONTROL_TYPE_BUFFER_EMPTY:
       return "buffer-empty";
     case GST_RTMP_USER_CONTROL_TYPE_BUFFER_READY:
