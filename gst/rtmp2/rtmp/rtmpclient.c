@@ -528,9 +528,16 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
     return;
   }
 
-  if (!args || args->len < 2) {
+  if (!args) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "connect failed");
+        "connect failed: %s", command_name);
+    g_object_unref (task);
+    return;
+  }
+
+  if (args->len < 2) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "connect failed; not enough return arguments");
     g_object_unref (task);
     return;
   }
@@ -985,7 +992,14 @@ create_stream_done (const gchar * command_name, GPtrArray * args,
     return;
   }
 
-  if (!args || args->len < 2) {
+  if (!args) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "createStream failed: %s", command_name);
+    g_object_unref (task);
+    return;
+  }
+
+  if (args->len < 2) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
         "createStream failed; not enough return arguments");
     g_object_unref (task);
@@ -1071,7 +1085,14 @@ on_publish_or_play_status (const gchar * command_name, GPtrArray * args,
     return;
   }
 
-  if (!args || args->len < 2) {
+  if (!args) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "%s failed: %s", command, command_name);
+    g_object_unref (task);
+    return;
+  }
+
+  if (args->len < 2) {
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
         "%s failed; not enough return arguments", command);
     g_object_unref (task);
