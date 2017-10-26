@@ -646,7 +646,8 @@ send_streamheader (GstRtmp2Sink * self)
     return;
   }
 
-  GST_DEBUG_OBJECT (self, "Sending %u streamheader chunks", self->headers->len);
+  GST_DEBUG_OBJECT (self, "Sending %u streamheader messages",
+      self->headers->len);
 
   for (i = 0; i < self->headers->len; i++) {
     send_message (self, g_ptr_array_index (self->headers, i));
@@ -764,7 +765,7 @@ gst_rtmp2_sink_set_caps (GstBaseSink * sink, GstCaps * caps)
     g_ptr_array_add (self->headers, message);
   }
 
-  GST_DEBUG_OBJECT (self, "Collected streamheaders: %u buffers -> %u chunks",
+  GST_DEBUG_OBJECT (self, "Collected streamheaders: %u buffers -> %u messages",
       i, self->headers->len);
 
   return TRUE;

@@ -695,14 +695,14 @@ got_message (GstRtmpConnection * connection, GstBuffer * buffer,
   g_return_if_fail (meta);
 
   if (meta->mstream != self->stream_id) {
-    GST_DEBUG_OBJECT (self, "Ignoring %s chunk with stream %" G_GUINT32_FORMAT
+    GST_DEBUG_OBJECT (self, "Ignoring %s message with stream %" G_GUINT32_FORMAT
         " != %" G_GUINT32_FORMAT, gst_rtmp_message_type_get_nick (meta->type),
         meta->mstream, self->stream_id);
     return;
   }
 
   if (meta->size == 0) {
-    GST_DEBUG_OBJECT (self, "Ignoring empty %s chunk",
+    GST_DEBUG_OBJECT (self, "Ignoring empty %s message",
         gst_rtmp_message_type_get_nick (meta->type));
     return;
   }
@@ -714,7 +714,7 @@ got_message (GstRtmpConnection * connection, GstBuffer * buffer,
       break;
 
     default:
-      GST_DEBUG_OBJECT (self, "Ignoring %s chunk, wrong type",
+      GST_DEBUG_OBJECT (self, "Ignoring %s message, wrong type",
           gst_rtmp_message_type_get_nick (meta->type));
       return;
   }
