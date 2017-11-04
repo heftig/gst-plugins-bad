@@ -110,6 +110,7 @@ gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
   HandshakeData *data;
   GOutputStream *os;
   GByteArray *ba;
+  GBytes *bytes;
 
   g_return_if_fail (G_IS_IO_STREAM (stream));
 
@@ -139,9 +140,11 @@ gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
   GST_MEMDUMP (">>> C0", ba->data, 1);
   GST_MEMDUMP (">>> C1", ba->data + 1, 1536);
 
+  bytes = g_byte_array_free_to_bytes (ba);
   gst_rtmp_output_stream_write_all_bytes_async (os,
-      g_byte_array_free_to_bytes (ba), G_PRIORITY_DEFAULT,
+      bytes, G_PRIORITY_DEFAULT,
       g_task_get_cancellable (task), client_handshake1_done, task);
+  g_bytes_unref (bytes);
 }
 
 static void
@@ -183,6 +186,7 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
   const guint8 *s0s1s2;
   gsize size;
   GByteArray *ba;
+  GBytes *bytes;
   gint64 c2time = g_get_monotonic_time ();
 
   res = gst_rtmp_input_stream_read_all_bytes_finish (is, result, &error);
@@ -230,10 +234,12 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
   GST_DEBUG ("Sending C2");
   GST_MEMDUMP (">>> C2", ba->data, 1536);
 
+  bytes = g_byte_array_free_to_bytes (ba);
   gst_rtmp_output_stream_write_all_bytes_async (os,
-      g_byte_array_free_to_bytes (ba), G_PRIORITY_DEFAULT,
+      bytes, G_PRIORITY_DEFAULT,
       g_task_get_cancellable (task), client_handshake3_done, task);
 
+  g_bytes_unref (bytes);
   g_bytes_unref (res);
 }
 
