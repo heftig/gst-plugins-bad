@@ -502,8 +502,8 @@ send_connect (GTask * task)
     uristr = g_strdup (uri);
   }
 
-  gst_amf_node_append_field_take_string (node, g_strdup ("app"), appstr, -1);
-  gst_amf_node_append_field_take_string (node, g_strdup ("tcUrl"), uristr, -1);
+  gst_amf_node_append_field_take_string (node, "app", appstr, -1);
+  gst_amf_node_append_field_take_string (node, "tcUrl", uristr, -1);
   gst_amf_node_append_field_string (node, "type", "nonprivate", -1);
   gst_amf_node_append_field_string (node, "flashVer", flash_ver, -1);
 
