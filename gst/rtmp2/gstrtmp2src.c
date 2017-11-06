@@ -828,6 +828,7 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
   } else {
     send_connect_error (self, error);
     stop_task (self);
+    g_error_free (error);
   }
 
   g_cond_broadcast (&self->cond);
