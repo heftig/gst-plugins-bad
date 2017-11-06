@@ -72,7 +72,7 @@ handshake_random_data (void)
   GByteArray *ba = g_byte_array_sized_new (1528);
   gint i;
 
-  for (i = 0; i < 1528; i += sizeof (guint32)) {
+  for (i = 0; i < 1528; i += 4) {
     serialize_u32 (ba, g_random_int ());
   }
 
