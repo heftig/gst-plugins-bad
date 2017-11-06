@@ -204,7 +204,7 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PARTIAL_INPUT,
         "Short read (want %d have %" G_GSIZE_FORMAT ")", 1 + 1536 * 2, size);
     g_object_unref (task);
-    return;
+    goto out;
   }
 
   GST_DEBUG ("Got S0+S1+S2");
@@ -217,7 +217,7 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
     g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
         "Handshake response data did not match");
     g_object_unref (task);
-    return;
+    goto out;
   }
 
   GST_DEBUG ("S2 random data matches C1");
@@ -245,6 +245,7 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
     g_bytes_unref (bytes);
   }
 
+out:
   g_bytes_unref (res);
 }
 
