@@ -102,24 +102,10 @@ handshake_data_check (HandshakeData * data, const guint8 * peerrandom)
   return memcmp (ourrandom, peerrandom, 1528) == 0;
 }
 
-void
-gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
-    GAsyncReadyCallback callback, gpointer user_data)
+static GBytes *
+create_c0c1 (GBytes * random_bytes)
 {
-  GTask *task;
-  HandshakeData *data;
-  GByteArray *ba;
-
-  g_return_if_fail (G_IS_IO_STREAM (stream));
-
-  init_debug ();
-  GST_INFO ("Starting client handshake");
-
-  task = g_task_new (stream, cancellable, callback, user_data);
-  data = handshake_data_new ();
-  g_task_set_task_data (task, data, handshake_data_free);
-
-  ba = g_byte_array_sized_new (1 + 1536);
+  GByteArray *ba = g_byte_array_sized_new (1 + 1536);
 
   /* C0 version */
   serialize_u8 (ba, 3);
@@ -131,15 +117,34 @@ gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
   serialize_u32 (ba, 0);
 
   /* C1 random data */
-  gst_rtmp_byte_array_append_bytes (ba, data->random_bytes);
+  gst_rtmp_byte_array_append_bytes (ba, random_bytes);
 
   GST_DEBUG ("Sending C0+C1");
   GST_MEMDUMP (">>> C0", ba->data, 1);
   GST_MEMDUMP (">>> C1", ba->data + 1, 1536);
 
+  return g_byte_array_free_to_bytes (ba);
+}
+
+void
+gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
+    GAsyncReadyCallback callback, gpointer user_data)
+{
+  GTask *task;
+  HandshakeData *data;
+
+  g_return_if_fail (G_IS_IO_STREAM (stream));
+
+  init_debug ();
+  GST_INFO ("Starting client handshake");
+
+  task = g_task_new (stream, cancellable, callback, user_data);
+  data = handshake_data_new ();
+  g_task_set_task_data (task, data, handshake_data_free);
+
   {
     GOutputStream *os = g_io_stream_get_output_stream (stream);
-    GBytes *bytes = g_byte_array_free_to_bytes (ba);
+    GBytes *bytes = create_c0c1 (data->random_bytes);
 
     gst_rtmp_output_stream_write_all_bytes_async (os,
         bytes, G_PRIORITY_DEFAULT,
@@ -174,6 +179,25 @@ client_handshake1_done (GObject * source, GAsyncResult * result,
       client_handshake2_done, task);
 }
 
+static GBytes *
+create_c2 (const guint8 * s0s1s2)
+{
+  GByteArray *ba = g_byte_array_sized_new (1536);
+  gint64 c2time = g_get_monotonic_time ();
+
+  /* Copy S1 to C2 */
+  g_byte_array_set_size (ba, 1536);
+  memcpy (ba->data, s0s1s2 + 1, 1536);
+
+  /* C2 time2 */
+  GST_WRITE_UINT32_BE (ba->data + 4, c2time / 1000);
+
+  GST_DEBUG ("Sending C2");
+  GST_MEMDUMP (">>> C2", ba->data, 1536);
+
+  return g_byte_array_free_to_bytes (ba);
+}
+
 static void
 client_handshake2_done (GObject * source, GAsyncResult * result,
     gpointer user_data)
@@ -186,8 +210,6 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
   GBytes *res;
   const guint8 *s0s1s2;
   gsize size;
-  GByteArray *ba;
-  gint64 c2time = g_get_monotonic_time ();
 
   res = gst_rtmp_input_stream_read_all_bytes_finish (is, result, &error);
   if (!res) {
@@ -222,21 +244,9 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
 
   GST_DEBUG ("S2 random data matches C1");
 
-  ba = g_byte_array_sized_new (1536);
-  g_byte_array_set_size (ba, 1536);
-
-  /* Copy S1 to C2 */
-  memcpy (ba->data, s0s1s2 + 1, 1536);
-
-  /* C2 time2 */
-  GST_WRITE_UINT32_BE (ba->data + 4, c2time / 1000);
-
-  GST_DEBUG ("Sending C2");
-  GST_MEMDUMP (">>> C2", ba->data, 1536);
-
   {
     GOutputStream *os = g_io_stream_get_output_stream (stream);
-    GBytes *bytes = g_byte_array_free_to_bytes (ba);
+    GBytes *bytes = create_c2 (s0s1s2);
 
     gst_rtmp_output_stream_write_all_bytes_async (os,
         bytes, G_PRIORITY_DEFAULT,
