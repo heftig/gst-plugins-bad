@@ -540,7 +540,7 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
     GstClockTime last_ts = self->last_ts, ts = GST_BUFFER_DTS (message);
 
     if (GST_CLOCK_TIME_IS_VALID (last_ts) && last_ts > ts) {
-      GST_WARNING_OBJECT (self, "Timestamp regression: %" GST_TIME_FORMAT
+      GST_LOG_OBJECT (self, "Timestamp regression: %" GST_TIME_FORMAT
           " > %" GST_TIME_FORMAT, GST_TIME_ARGS (last_ts), GST_TIME_ARGS (ts));
     }
 
