@@ -537,17 +537,15 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
   }
 
   if (GST_BUFFER_DTS_IS_VALID (message)) {
-    GstClockTime last_ts = self->last_ts;
+    GstClockTime last_ts = self->last_ts, ts = GST_BUFFER_DTS (message);
 
-    timestamp = GST_BUFFER_DTS (message) / GST_MSECOND;
-
-    if (GST_CLOCK_TIME_IS_VALID (last_ts) && last_ts > timestamp) {
+    if (GST_CLOCK_TIME_IS_VALID (last_ts) && last_ts > ts) {
       GST_WARNING_OBJECT (self, "Timestamp regression: %" GST_TIME_FORMAT
-          " > %" GST_TIME_FORMAT, GST_TIME_ARGS (last_ts),
-          GST_TIME_ARGS (timestamp));
+          " > %" GST_TIME_FORMAT, GST_TIME_ARGS (last_ts), GST_TIME_ARGS (ts));
     }
 
-    self->last_ts = timestamp;
+    self->last_ts = ts;
+    timestamp = ts / GST_MSECOND;
   }
 
   buffer = gst_buffer_copy_region (message, GST_BUFFER_COPY_MEMORY, 0, -1);
