@@ -136,8 +136,7 @@ parse_path (GstUri * uri, gchar ** application, gchar ** stream)
 
   /* Test if too short, or not absolute */
   if (nsegments < 3 || segments->data != NULL) {
-    g_list_free_full (segments, g_free);
-    return FALSE;
+    goto err;
   }
 
   /* Strip root */
@@ -171,6 +170,10 @@ parse_path (GstUri * uri, gchar ** application, gchar ** stream)
   }
 
   return TRUE;
+
+err:
+  g_list_free_full (segments, g_free);
+  return FALSE;
 }
 
 static gboolean
