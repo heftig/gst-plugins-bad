@@ -125,6 +125,7 @@ static gboolean
 parse_path (const gchar * string, GstUri * uri, gchar ** application,
     gchar ** stream, GError ** error)
 {
+  gchar *query;
   GList *segments;
   guint nsegments;
 
@@ -132,6 +133,7 @@ parse_path (const gchar * string, GstUri * uri, gchar ** application,
   g_return_val_if_fail (application, FALSE);
   g_return_val_if_fail (stream, FALSE);
 
+  query = gst_uri_get_query_string (uri);
   segments = gst_uri_get_path_segments (uri);
   nsegments = g_list_length (segments);
 
@@ -153,7 +155,6 @@ parse_path (const gchar * string, GstUri * uri, gchar ** application,
 
   /* Extract stream */
   {
-    gchar *query = gst_uri_get_query_string (uri);
     GList *segment = g_list_last (segments);
     gchar *streamname = segment->data;
 
@@ -164,8 +165,8 @@ parse_path (const gchar * string, GstUri * uri, gchar ** application,
       *stream = streamname;
     }
 
+    /* Strip stream, leaving app path */
     segments = g_list_delete_link (segments, segment);
-    g_free (query);
   }
 
   {
@@ -178,10 +179,12 @@ parse_path (const gchar * string, GstUri * uri, gchar ** application,
     gst_uri_unref (tempuri);
   }
 
+  g_free (query);
   return TRUE;
 
 err:
   g_list_free_full (segments, g_free);
+  g_free (query);
   return FALSE;
 }
 
