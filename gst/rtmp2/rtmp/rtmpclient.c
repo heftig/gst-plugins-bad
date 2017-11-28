@@ -313,6 +313,13 @@ socket_connect (GTask * task)
     g_clear_object (&data->connection);
   }
 
+  if (!data->location.host) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
+        "Host is not set");
+    g_object_unref (task);
+    return;
+  }
+
   socket_client = g_socket_client_new ();
   g_socket_client_set_timeout (socket_client, data->location.timeout);
 
