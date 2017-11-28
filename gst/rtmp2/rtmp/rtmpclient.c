@@ -490,14 +490,14 @@ send_connect (GTask * task)
       g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
           "no username for adobe authentication");
       g_object_unref (task);
-      return;
+      goto out;
     }
 
     if (!data->location.password) {
       g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
           "no password for adobe authentication");
       g_object_unref (task);
-      return;
+      goto out;
     }
 
     appstr = g_strdup_printf ("%s?authmod=%s&user=%s", app, authmod, user);
@@ -515,6 +515,7 @@ send_connect (GTask * task)
   gst_rtmp_connection_send_command (data->connection, send_connect_done,
       task, 0, "connect", node, NULL);
 
+out:
   gst_amf_node_free (node);
   g_free (uri);
 }
