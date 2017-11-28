@@ -122,7 +122,8 @@ uri_handler_get_uri (GstURIHandler * handler)
 }
 
 static gboolean
-parse_path (GstUri * uri, gchar ** application, gchar ** stream)
+parse_path (const gchar * string, GstUri * uri, gchar ** application,
+    gchar ** stream, GError ** error)
 {
   GList *segments;
   guint nsegments;
@@ -135,7 +136,15 @@ parse_path (GstUri * uri, gchar ** application, gchar ** stream)
   nsegments = g_list_length (segments);
 
   /* Test if too short, or not absolute */
-  if (nsegments < 3 || segments->data != NULL) {
+  if (nsegments < 3) {
+    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+        "URI path too short: %s", string);
+    goto err;
+  }
+
+  if (segments->data != NULL) {
+    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+        "URI path not absolute: %s", string);
     goto err;
   }
 
@@ -225,9 +234,7 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     port = gst_rtmp_scheme_get_default_port (scheme);
   }
 
-  if (!parse_path (uri, &application, &stream)) {
-    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
-        "URI has bad path: %s", string);
+  if (!parse_path (string, uri, &application, &stream, error)) {
     goto out;
   }
 
