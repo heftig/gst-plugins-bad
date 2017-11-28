@@ -313,18 +313,30 @@ socket_connect (GTask * task)
     g_clear_object (&data->connection);
   }
 
-  addr = g_network_address_new (data->location.host, data->location.port);
   socket_client = g_socket_client_new ();
+  g_socket_client_set_timeout (socket_client, data->location.timeout);
 
-  if (data->location.scheme == GST_RTMP_SCHEME_RTMPS) {
-    GST_DEBUG ("Configuring TLS, validation flags 0x%02x",
-        data->location.tls_flags);
-    g_socket_client_set_tls (socket_client, TRUE);
-    g_socket_client_set_tls_validation_flags (socket_client,
-        data->location.tls_flags);
+  switch (data->location.scheme) {
+    case GST_RTMP_SCHEME_RTMP:
+      break;
+
+    case GST_RTMP_SCHEME_RTMPS:
+      GST_DEBUG ("Configuring TLS, validation flags 0x%02x",
+          data->location.tls_flags);
+      g_socket_client_set_tls (socket_client, TRUE);
+      g_socket_client_set_tls_validation_flags (socket_client,
+          data->location.tls_flags);
+      break;
+
+    default:
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+          "Invalid scheme ID %d", data->location.scheme);
+      g_object_unref (socket_client);
+      g_object_unref (task);
+      return;
   }
 
-  g_socket_client_set_timeout (socket_client, data->location.timeout);
+  addr = g_network_address_new (data->location.host, data->location.port);
 
   GST_DEBUG ("Starting socket connection");
 
