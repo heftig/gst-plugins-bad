@@ -39,7 +39,7 @@ init_static (void)
 {
   static volatile gsize done = 0;
   if (g_once_init_enter (&done)) {
-    null_bytes = g_bytes_new_static (NULL, 0);
+    null_bytes = g_bytes_new_static ("", 0);
     GST_DEBUG_CATEGORY_INIT (gst_rtmp_amf_debug_category, "rtmpamf", 0,
         "debug category for the amf parser");
     g_once_init_leave (&done, 1);
@@ -413,6 +413,8 @@ gst_amf_node_take_string (GstAmfNode * node, gchar * value, gssize size)
   g_return_if_fail (node->type == GST_AMF_TYPE_STRING ||
       node->type == GST_AMF_TYPE_LONG_STRING);
 
+  g_return_if_fail (value);
+
   if (size < 0) {
     size = strlen (value);
   }
@@ -435,6 +437,8 @@ void
 gst_amf_node_set_string (GstAmfNode * node, const gchar * value, gssize size)
 {
   gchar *copy;
+
+  g_return_if_fail (value);
 
   if (size < 0) {
     size = strlen (value);
@@ -459,6 +463,7 @@ gst_amf_node_append_take_field (GstAmfNode * node, const gchar * name,
 {
   g_return_if_fail (node->type == GST_AMF_TYPE_OBJECT ||
       node->type == GST_AMF_TYPE_ECMA_ARRAY);
+  g_return_if_fail (name);
   append_field (node, g_strdup (name), value);
 }
 
