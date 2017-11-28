@@ -159,10 +159,14 @@ parse_path (const gchar * string, GstUri * uri, gchar ** application,
     gchar *streamname = segment->data;
 
     if (query && query[0]) {
-      *stream = g_strconcat (streamname, "?", query, NULL);
+      *stream = g_strconcat (streamname ? streamname : "", "?", query, NULL);
       g_free (streamname);
-    } else {
+    } else if (streamname) {
       *stream = streamname;
+    } else {
+      g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+          "URI lacks stream: %s", string);
+      goto err;
     }
 
     /* Strip stream, leaving app path */
