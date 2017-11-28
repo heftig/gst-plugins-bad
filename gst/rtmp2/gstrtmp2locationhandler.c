@@ -300,9 +300,14 @@ gst_rtmp_location_handler_set_uri (GstRtmpLocationHandler * handler,
   GError *error = NULL;
   gboolean ret;
 
+  g_return_val_if_fail (GST_IS_RTMP_LOCATION_HANDLER (handler), FALSE);
+
   ret = gst_uri_handler_set_uri (GST_URI_HANDLER (handler), uri, &error);
   if (!ret) {
     GST_ERROR_OBJECT (handler, "Failed to set URI: %s", error->message);
+    g_object_set (handler, "scheme", DEFAULT_SCHEME, "host", NULL,
+        "port", gst_rtmp_scheme_get_default_port (DEFAULT_SCHEME),
+        "application", NULL, "stream", NULL, NULL);
     g_error_free (error);
   }
   return ret;
