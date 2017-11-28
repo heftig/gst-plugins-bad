@@ -936,6 +936,14 @@ start_stream (GstRtmpConnection * connection, const gchar * stream,
   init_debug ();
 
   task = g_task_new (connection, cancellable, callback, user_data);
+
+  if (!stream) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
+        "Stream is not set");
+    g_object_unref (task);
+    return;
+  }
+
   data = stream_task_data_new (connection, stream, publish);
   g_task_set_task_data (task, data, stream_task_data_free);
 
