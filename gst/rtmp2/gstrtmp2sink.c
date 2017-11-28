@@ -448,7 +448,9 @@ stop_task (GstRtmp2Sink * self)
 
   if (self->loop) {
     GST_DEBUG_OBJECT (self, "Stopping loop");
-    g_main_context_invoke (self->context, quit_invoker, self->loop);
+    g_main_context_invoke_full (self->context, G_PRIORITY_DEFAULT_IDLE,
+        quit_invoker, g_main_loop_ref (self->loop),
+        (GDestroyNotify) g_main_loop_unref);
   }
 
   g_cond_broadcast (&self->cond);
