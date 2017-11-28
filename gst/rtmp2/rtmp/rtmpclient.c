@@ -500,6 +500,13 @@ send_connect (GTask * task)
   flash_ver = data->location.flash_ver;
   uri = gst_rtmp_location_get_string (&data->location, FALSE);
 
+  if (!app) {
+    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
+        "Application is not set");
+    g_object_unref (task);
+    goto out;
+  }
+
   if (!flash_ver) {
     flash_ver = "LNX 10,0,32,18";
   }
