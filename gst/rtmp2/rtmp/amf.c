@@ -686,10 +686,15 @@ read_string (AmfParser * parser, gsize size)
     return NULL;
   }
 
-  /* Null terminate the string */
-  string = g_malloc (size + 1);
+  /* Null-terminate all incoming strings for internal safety */
+  if (parser->data[parser->offset + size - 1] == 0) {
+    string = g_malloc (size);
+  } else {
+    string = g_malloc (size + 1);
+    string[size] = 0;
+  }
+
   memcpy (string, parser->data + parser->offset, size);
-  string[size] = 0;
 
   parser->offset += size;
   return string;
