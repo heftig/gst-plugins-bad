@@ -652,7 +652,7 @@ parse_number (AmfParser * parser)
 {
   gdouble value;
 
-  if (parser->offset + sizeof value > parser->size) {
+  if (sizeof value > parser->size - parser->offset) {
     GST_ERROR ("number too long");
     return 0.0;
   }
@@ -667,7 +667,7 @@ parse_boolean (AmfParser * parser)
 {
   guint8 value;
 
-  if (parser->offset + sizeof value > parser->size) {
+  if (sizeof value > parser->size - parser->offset) {
     GST_ERROR ("boolean too long");
     return FALSE;
   }
@@ -681,7 +681,7 @@ read_string (AmfParser * parser, gsize size)
 {
   gchar *string;
 
-  if (parser->offset + size > parser->size) {
+  if (size > parser->size - parser->offset) {
     GST_ERROR ("string too long (%zu)", size);
     return NULL;
   }
@@ -705,7 +705,7 @@ parse_string (AmfParser * parser, gsize * out_size)
 {
   guint16 size;
 
-  if (parser->offset + sizeof size > parser->size) {
+  if (sizeof size > parser->size - parser->offset) {
     GST_ERROR ("string size too long");
     return NULL;
   }
@@ -723,7 +723,7 @@ parse_long_string (AmfParser * parser, gsize * out_size)
 {
   guint32 size;
 
-  if (parser->offset + sizeof size > parser->size) {
+  if (sizeof size > parser->size - parser->offset) {
     GST_ERROR ("long string size too long");
     return NULL;
   }
@@ -789,7 +789,7 @@ parse_ecma_array (AmfParser * parser, GstAmfNode * node)
 {
   guint32 n_elements, n_read;
 
-  if (parser->offset + sizeof n_elements > parser->size) {
+  if (sizeof n_elements > parser->size - parser->offset) {
     GST_ERROR ("array size too long");
     return;
   }
@@ -817,7 +817,7 @@ parse_strict_array (AmfParser * parser, GstAmfNode * node)
   GstAmfNode *value = NULL;
   guint32 n_elements, i;
 
-  if (parser->offset + sizeof n_elements > parser->size) {
+  if (sizeof n_elements > parser->size - parser->offset) {
     GST_ERROR ("array size too long");
     return;
   }
@@ -841,7 +841,7 @@ parse_value (AmfParser * parser)
   GstAmfNode *node = NULL;
   GstAmfType type;
 
-  if (parser->offset + 1 > parser->size) {
+  if (1 > parser->size - parser->offset) {
     GST_ERROR ("value too long");
     return NULL;
   }
