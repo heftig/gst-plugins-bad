@@ -902,7 +902,7 @@ gst_amf_parse_command (const guint8 * data, gsize size,
     .size = size,
     .recursion_depth = 0,
   };
-  GstAmfNode *node1 = NULL, *node2 = NULL, *node;
+  GstAmfNode *node1 = NULL, *node2 = NULL;
   GPtrArray *args = NULL;
 
   g_return_val_if_fail (data, NULL);
@@ -929,7 +929,12 @@ gst_amf_parse_command (const guint8 * data, gsize size,
 
   args = g_ptr_array_new_with_free_func (gst_amf_node_free);
 
-  while (parser.offset < parser.size && (node = parse_value (&parser))) {
+  while (parser.offset < parser.size) {
+    GstAmfNode *node = parse_value (&parser);
+    if (!node) {
+      break;
+    }
+
     dump_argument (node, args->len);
     g_ptr_array_add (args, node);
   }
@@ -1116,7 +1121,6 @@ gst_amf_serialize_command_valist (gdouble transaction_id,
     const gchar * command_name, const GstAmfNode * argument, va_list var_args)
 {
   GByteArray *array = g_byte_array_new ();
-  const GstAmfNode *node;
   guint i = 0;
 
   g_return_val_if_fail (command_name, NULL);
@@ -1129,13 +1133,12 @@ gst_amf_serialize_command_valist (gdouble transaction_id,
   serialize_string (array, command_name, -1);
   serialize_u8 (array, GST_AMF_TYPE_NUMBER);
   serialize_number (array, transaction_id);
-  serialize_value (array, argument);
-  dump_argument (argument, i++);
 
-  while ((node = va_arg (var_args, const GstAmfNode *)))
-  {
-    serialize_value (array, node);
-    dump_argument (node, i++);
+  while (argument) {
+    serialize_value (array, argument);
+    dump_argument (argument, i++);
+
+    argument = va_arg (var_args, const GstAmfNode *);
   }
 
   GST_TRACE ("Done serializing; consumed %u args and produced %u bytes", i,
