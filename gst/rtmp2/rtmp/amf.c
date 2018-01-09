@@ -687,7 +687,7 @@ read_string (AmfParser * parser, gsize size)
   }
 
   /* Null-terminate all incoming strings for internal safety */
-  if (parser->data[parser->offset + size - 1] == 0) {
+  if (size > 0 && parser->data[parser->offset + size - 1] == 0) {
     string = g_malloc (size);
   } else {
     string = g_malloc (size + 1);
@@ -748,7 +748,7 @@ parse_bytes (AmfParser * parser, gboolean long_string)
     data = parse_string (parser, &size);
   }
 
-  return g_bytes_new_take (data, size + 1);
+  return g_bytes_new_take (data, size);
 }
 
 static guint32
