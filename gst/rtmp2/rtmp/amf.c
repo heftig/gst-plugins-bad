@@ -700,8 +700,8 @@ read_string (AmfParser * parser, gsize size)
   return string;
 }
 
-static gchar *
-parse_string (AmfParser * parser, gsize * out_size)
+static GBytes *
+parse_string (AmfParser * parser)
 {
   guint16 size;
 
@@ -711,15 +711,16 @@ parse_string (AmfParser * parser, gsize * out_size)
   }
 
   size = parse_u16 (parser);
-  if (out_size) {
-    *out_size = size;
-  }
 
-  return read_string (parser, size);
+  if (size == 0) {
+    return g_bytes_ref (null_bytes);
+  } else {
+    return g_bytes_new_take (read_string (parser, size), size);
+  }
 }
 
-static gchar *
-parse_long_string (AmfParser * parser, gsize * out_size)
+static GBytes *
+parse_long_string (AmfParser * parser)
 {
   guint32 size;
 
@@ -729,37 +730,25 @@ parse_long_string (AmfParser * parser, gsize * out_size)
   }
 
   size = parse_u32 (parser);
-  if (out_size) {
-    *out_size = size;
-  }
 
-  return read_string (parser, size);
-}
-
-static inline GBytes *
-parse_bytes (AmfParser * parser, gboolean long_string)
-{
-  gchar *data;
-  gsize size;
-
-  if (long_string) {
-    data = parse_long_string (parser, &size);
+  if (size == 0) {
+    return g_bytes_ref (null_bytes);
   } else {
-    data = parse_string (parser, &size);
+    return g_bytes_new_take (read_string (parser, size), size);
   }
-
-  return g_bytes_new_take (data, size);
 }
 
 static guint32
 parse_object (AmfParser * parser, GstAmfNode * node)
 {
-  gchar *name;
-  GstAmfNode *value;
   guint32 n_fields = 0;
 
   while (TRUE) {
-    name = parse_string (parser, NULL);
+    GBytes *name;
+    gsize size;
+    GstAmfNode *value;
+
+    name = parse_string (parser);
     if (!name) {
       GST_ERROR ("object too long");
       break;
@@ -768,19 +757,20 @@ parse_object (AmfParser * parser, GstAmfNode * node)
     value = parse_value (parser);
     if (!value) {
       GST_ERROR ("object too long");
+      g_bytes_unref (name);
       break;
     }
 
     if (gst_amf_node_get_type (value) == GST_AMF_TYPE_OBJECT_END) {
+      g_bytes_unref (name);
       gst_amf_node_free (value);
       break;
     }
 
-    append_field (node, name, value);
+    append_field (node, g_bytes_unref_to_data (name, &size), value);
     n_fields++;
   };
 
-  g_free (name);
   return n_fields;
 }
 
@@ -864,10 +854,10 @@ parse_value (AmfParser * parser)
       node->value.v_int = parse_boolean (parser);
       break;
     case GST_AMF_TYPE_STRING:
-      node->value.v_bytes = parse_bytes (parser, FALSE);
+      node->value.v_bytes = parse_string (parser);
       break;
     case GST_AMF_TYPE_LONG_STRING:
-      node->value.v_bytes = parse_bytes (parser, TRUE);
+      node->value.v_bytes = parse_long_string (parser);
       break;
     case GST_AMF_TYPE_OBJECT:
       parse_object (parser, node);
