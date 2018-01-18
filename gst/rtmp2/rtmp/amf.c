@@ -676,10 +676,14 @@ parse_boolean (AmfParser * parser)
   return ! !value;
 }
 
-static gchar *
+static GBytes *
 read_string (AmfParser * parser, gsize size)
 {
   gchar *string;
+
+  if (size == 0) {
+    return g_bytes_ref (null_bytes);
+  }
 
   if (size > parser->size - parser->offset) {
     GST_ERROR ("string too long (%zu)", size);
@@ -687,7 +691,7 @@ read_string (AmfParser * parser, gsize size)
   }
 
   /* Null-terminate all incoming strings for internal safety */
-  if (size > 0 && parser->data[parser->offset + size - 1] == 0) {
+  if (parser->data[parser->offset + size - 1] == 0) {
     string = g_malloc (size);
   } else {
     string = g_malloc (size + 1);
@@ -697,7 +701,7 @@ read_string (AmfParser * parser, gsize size)
   memcpy (string, parser->data + parser->offset, size);
 
   parser->offset += size;
-  return string;
+  return g_bytes_new_take (string, size);
 }
 
 static GBytes *
@@ -711,12 +715,7 @@ parse_string (AmfParser * parser)
   }
 
   size = parse_u16 (parser);
-
-  if (size == 0) {
-    return g_bytes_ref (null_bytes);
-  } else {
-    return g_bytes_new_take (read_string (parser, size), size);
-  }
+  return read_string (parser, size);
 }
 
 static GBytes *
@@ -730,12 +729,7 @@ parse_long_string (AmfParser * parser)
   }
 
   size = parse_u32 (parser);
-
-  if (size == 0) {
-    return g_bytes_ref (null_bytes);
-  } else {
-    return g_bytes_new_take (read_string (parser, size), size);
-  }
+  return read_string (parser, size);
 }
 
 static guint32
