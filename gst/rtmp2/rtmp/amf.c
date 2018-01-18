@@ -32,14 +32,14 @@
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp_amf_debug_category);
 #define GST_CAT_DEFAULT gst_rtmp_amf_debug_category
 
-static GBytes *null_bytes;
+static GBytes *empty_bytes;
 
 static void
 init_static (void)
 {
   static volatile gsize done = 0;
   if (g_once_init_enter (&done)) {
-    null_bytes = g_bytes_new_static ("", 0);
+    empty_bytes = g_bytes_new_static ("", 0);
     GST_DEBUG_CATEGORY_INIT (gst_rtmp_amf_debug_category, "rtmpamf", 0,
         "debug category for the amf parser");
     g_once_init_leave (&done, 1);
@@ -161,7 +161,7 @@ node_new (GstAmfType type)
   switch (type) {
     case GST_AMF_TYPE_STRING:
     case GST_AMF_TYPE_LONG_STRING:
-      node->value.v_bytes = g_bytes_ref (null_bytes);
+      node->value.v_bytes = g_bytes_ref (empty_bytes);
       break;
 
     case GST_AMF_TYPE_OBJECT:
@@ -682,7 +682,7 @@ read_string (AmfParser * parser, gsize size)
   gchar *string;
 
   if (size == 0) {
-    return g_bytes_ref (null_bytes);
+    return g_bytes_ref (empty_bytes);
   }
 
   if (size > parser->size - parser->offset) {
