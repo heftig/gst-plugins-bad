@@ -676,7 +676,7 @@ parse_boolean (AmfParser * parser)
   return ! !value;
 }
 
-static GBytes *
+static inline GBytes *
 read_string (AmfParser * parser, gsize size)
 {
   gchar *string;
@@ -970,14 +970,14 @@ serialize_u32 (GByteArray * array, guint32 value)
   g_byte_array_append (array, (guint8 *) & value, sizeof value);
 }
 
-static void
+static inline void
 serialize_number (GByteArray * array, gdouble value)
 {
   value = GDOUBLE_TO_BE (value);
   g_byte_array_append (array, (guint8 *) & value, sizeof value);
 }
 
-static void
+static inline void
 serialize_boolean (GByteArray * array, gboolean value)
 {
   serialize_u8 (array, value);
