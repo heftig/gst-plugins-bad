@@ -761,6 +761,13 @@ parse_object (AmfParser * parser, GstAmfNode * node)
       break;
     }
 
+    if (g_bytes_get_size (name) == 0) {
+      GST_ERROR ("empty object field name");
+      g_bytes_unref (name);
+      gst_amf_node_free (value);
+      break;
+    }
+
     append_field (node, g_bytes_unref_to_data (name, &size), value);
     n_fields++;
   };
