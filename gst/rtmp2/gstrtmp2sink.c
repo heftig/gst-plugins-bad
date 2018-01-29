@@ -727,44 +727,77 @@ gst_rtmp2_sink_render (GstBaseSink * sink, GstBuffer * buffer)
   return ret;
 }
 
-static const GArray *
-caps_get_streamheader (GstCaps * caps)
+static gboolean
+add_streamheader (GstRtmp2Sink * self, const GValue * value)
 {
-  GstStructure *s = gst_caps_get_structure (caps, 0);
-  const GValue *v = gst_structure_get_value (s, "streamheader");
-  return v ? g_value_peek_pointer (v) : NULL;
+  GstBuffer *buffer, *message;
+
+  g_return_val_if_fail (value, FALSE);
+
+  if (!GST_VALUE_HOLDS_BUFFER (value)) {
+    GST_ERROR_OBJECT (self, "'streamheader' item of unexpected type '%s'",
+        G_VALUE_TYPE_NAME (value));
+    return FALSE;
+  }
+
+  buffer = g_value_peek_pointer (value);
+
+  if (!buffer_to_message (self, buffer, &message)) {
+    GST_ERROR_OBJECT (self, "Failed to read streamheader %" GST_PTR_FORMAT,
+        buffer);
+    return FALSE;
+  }
+
+  if (message) {
+    GST_DEBUG_OBJECT (self, "Adding streamheader %" GST_PTR_FORMAT, buffer);
+    g_ptr_array_add (self->headers, message);
+  } else {
+    GST_DEBUG_OBJECT (self, "Skipping streamheader %" GST_PTR_FORMAT, buffer);
+  }
+
+  return TRUE;
 }
 
 static gboolean
 gst_rtmp2_sink_set_caps (GstBaseSink * sink, GstCaps * caps)
 {
   GstRtmp2Sink *self = GST_RTMP2_SINK (sink);
-  const GArray *streamheader;
-  guint i;
+  GstStructure *s;
+  const GValue *streamheader;
+  guint i = 0;
 
   GST_DEBUG_OBJECT (self, "setcaps %" GST_PTR_FORMAT, caps);
 
   g_ptr_array_set_size (self->headers, 0);
 
-  streamheader = caps_get_streamheader (caps);
-  for (i = 0; i < streamheader->len; i++) {
-    GstBuffer *buffer =
-        g_value_peek_pointer (&g_array_index (streamheader, GValue, i));
-    GstBuffer *message;
+  s = gst_caps_get_structure (caps, 0);
+  streamheader = gst_structure_get_value (s, "streamheader");
 
-    if (!buffer_to_message (self, buffer, &message)) {
-      GST_ERROR_OBJECT (self, "Failed to read streamheader %" GST_PTR_FORMAT,
-          buffer);
+  if (!streamheader) {
+    GST_DEBUG_OBJECT (self, "'streamheader' field not present");
+  } else if (GST_VALUE_HOLDS_BUFFER (streamheader)) {
+    GST_DEBUG_OBJECT (self, "'streamheader' field holds buffer");
+    if (!add_streamheader (self, streamheader)) {
       return FALSE;
     }
 
-    if (!message) {
-      GST_DEBUG_OBJECT (self, "Skipping streamheader %" GST_PTR_FORMAT, buffer);
-      continue;
-    }
+    i = 1;
+  } else if (GST_VALUE_HOLDS_ARRAY (streamheader)) {
+    guint size = gst_value_array_get_size (streamheader);
 
-    GST_DEBUG_OBJECT (self, "Adding streamheader %" GST_PTR_FORMAT, buffer);
-    g_ptr_array_add (self->headers, message);
+    GST_DEBUG_OBJECT (self, "'streamheader' field holds array");
+
+    for (; i < size; i++) {
+      const GValue *v = gst_value_array_get_value (streamheader, i);
+
+      if (!add_streamheader (self, v)) {
+        return FALSE;
+      }
+    }
+  } else {
+    GST_ERROR_OBJECT (self, "'streamheader' field has unexpected type '%s'",
+        G_VALUE_TYPE_NAME (streamheader));
+    return FALSE;
   }
 
   GST_DEBUG_OBJECT (self, "Collected streamheaders: %u buffers -> %u messages",
