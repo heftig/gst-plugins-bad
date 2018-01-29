@@ -595,8 +595,8 @@ buffer_to_message (GstRtmp2Sink * self, GstBuffer * buffer, GstBuffer ** outbuf)
   GST_BUFFER_DTS (message) = timestamp * GST_MSECOND;
 
   if (type == GST_RTMP_MESSAGE_TYPE_DATA_AMF0) {
-    /* FIXME HACK, attach a setDataFrame header.  This should be done
-     * using a command. */
+    /* FIXME: HACK: Attach a setDataFrame header.
+     *        This should be done using a command. */
 
     static const guint8 header[] = {
       0x02, 0x00, 0x0d, 0x40, 0x73, 0x65, 0x74, 0x44,
