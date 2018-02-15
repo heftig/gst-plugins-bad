@@ -740,7 +740,7 @@ add_streamheader (GstRtmp2Sink * self, const GValue * value)
     return FALSE;
   }
 
-  buffer = g_value_peek_pointer (value);
+  buffer = gst_value_get_buffer (value);
 
   if (!buffer_to_message (self, buffer, &message)) {
     GST_ERROR_OBJECT (self, "Failed to read streamheader %" GST_PTR_FORMAT,
