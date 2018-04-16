@@ -978,11 +978,11 @@ gst_rtmp_connection_send_ping_response (GstRtmpConnection * connection,
 static void
 gst_rtmp_connection_send_window_size_request (GstRtmpConnection * connection)
 {
-  GstRtmpUserControl uc = {
+  GstRtmpProtocolControl pc = {
     .type = GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE,
     .param = connection->peer_bandwidth,
   };
 
   gst_rtmp_connection_queue_message (connection,
-      gst_rtmp_message_new_user_control (&uc));
+      gst_rtmp_message_new_protocol_control (&pc));
 }
