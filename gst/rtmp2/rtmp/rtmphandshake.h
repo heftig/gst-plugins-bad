@@ -24,8 +24,9 @@
 
 G_BEGIN_DECLS
 
-void gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
-    GAsyncReadyCallback callback, gpointer user_data);
+void gst_rtmp_client_handshake (GIOStream * stream, gboolean strict,
+    GCancellable * cancellable, GAsyncReadyCallback callback,
+    gpointer user_data);
 gboolean gst_rtmp_client_handshake_finish (GIOStream * stream,
     GAsyncResult * result, GError ** error);
 
