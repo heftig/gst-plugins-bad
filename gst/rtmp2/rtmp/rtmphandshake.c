@@ -71,6 +71,7 @@ serialize_u32 (GByteArray * array, guint32 value)
 typedef struct
 {
   GBytes *random_bytes;
+  gboolean strict;
 } HandshakeData;
 
 static GBytes *
@@ -89,10 +90,11 @@ handshake_random_data (void)
 }
 
 static HandshakeData *
-handshake_data_new (void)
+handshake_data_new (gboolean strict)
 {
   HandshakeData *data = g_slice_new0 (HandshakeData);
   data->random_bytes = handshake_random_data ();
+  data->strict = strict;
   return data;
 }
 
@@ -136,8 +138,9 @@ create_c0c1 (GBytes * random_bytes)
 }
 
 void
-gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
-    GAsyncReadyCallback callback, gpointer user_data)
+gst_rtmp_client_handshake (GIOStream * stream, gboolean strict,
+    GCancellable * cancellable, GAsyncReadyCallback callback,
+    gpointer user_data)
 {
   GTask *task;
   HandshakeData *data;
@@ -148,7 +151,7 @@ gst_rtmp_client_handshake (GIOStream * stream, GCancellable * cancellable,
   GST_INFO ("Starting client handshake");
 
   task = g_task_new (stream, cancellable, callback, user_data);
-  data = handshake_data_new ();
+  data = handshake_data_new (strict);
   g_task_set_task_data (task, data, handshake_data_free);
 
   {
@@ -245,15 +248,19 @@ client_handshake2_done (GObject * source, GAsyncResult * result,
   GST_MEMDUMP ("<<< S1", s0s1s2 + SIZE_P0, SIZE_P1);
   GST_MEMDUMP ("<<< S2", s0s1s2 + SIZE_P0P1, SIZE_P2);
 
-  if (!handshake_data_check (data, s0s1s2 + SIZE_P0P1)) {
-    GST_ERROR ("Handshake response data did not match");
-    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-        "Handshake response data did not match");
-    g_object_unref (task);
-    goto out;
-  }
+  if (handshake_data_check (data, s0s1s2 + SIZE_P0P1)) {
+    GST_DEBUG ("S2 random data matches C1");
+  } else {
+    if (data->strict) {
+      GST_ERROR ("Handshake response data did not match");
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+          "Handshake response data did not match");
+      g_object_unref (task);
+      goto out;
+    }
 
-  GST_DEBUG ("S2 random data matches C1");
+    GST_WARNING ("Handshake reponse data did not match; continuing anyway");
+  }
 
   {
     GOutputStream *os = g_io_stream_get_output_stream (stream);

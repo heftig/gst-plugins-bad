@@ -387,7 +387,7 @@ socket_connect_done (GObject * source, GAsyncResult * result,
 
   GST_DEBUG ("Socket connection established");
 
-  gst_rtmp_client_handshake (G_IO_STREAM (socket_connection),
+  gst_rtmp_client_handshake (G_IO_STREAM (socket_connection), FALSE,
       g_task_get_cancellable (task), handshake_done, task);
   g_object_unref (socket_connection);
 }
