@@ -729,13 +729,15 @@ send_connect_done (const gchar * command_name, GPtrArray * args,
 static void
 rtmp_tea_decode_prep_key (const gchar * key, guint32 out[4])
 {
-  gchar copy[16];
+  gchar copy[17];
 
   g_return_if_fail (key);
   g_return_if_fail (out);
 
   /* ensure we can read 16 bytes */
   strncpy (copy, key, 16);
+  /* placate GCC 8 -Wstringop-truncation */
+  copy[16] = 0;
 
   out[0] = GST_READ_UINT32_LE (copy);
   out[1] = GST_READ_UINT32_LE (copy + 4);
@@ -756,13 +758,15 @@ rtmp_tea_decode_prep_text (const gchar * text)
   arr = g_array_sized_new (TRUE, TRUE, 4, (len + 7) / 8);
 
   for (i = 0; i < len; i += 8) {
-    gchar copy[8];
+    gchar copy[9];
     guchar chars[4];
     gsize j;
     guint32 val;
 
     /* ensure we can read 8 bytes */
     strncpy (copy, text + i, 8);
+    /* placate GCC 8 -Wstringop-truncation */
+    copy[8] = 0;
 
     for (j = 0; j < 4; j++) {
       gint hi, lo;
