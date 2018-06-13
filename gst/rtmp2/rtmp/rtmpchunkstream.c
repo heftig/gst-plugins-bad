@@ -516,9 +516,17 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
 
     delta_64 *= GST_MSECOND;
 
-    if (delta_64 < 0) {
+    if (G_LIKELY (delta_64 >= 0)) {
+      /* Normal advancement */
+    } else if (G_LIKELY ((guint64) (-delta_64) <= dts)) {
+      /* In-bounds regression */
       GST_WARNING ("Timestamp regression: %" GST_STIME_FORMAT,
           GST_STIME_ARGS (delta_64));
+    } else {
+      /* Out-of-bounds regression */
+      GST_WARNING ("Timestamp regression: %" GST_STIME_FORMAT ", offsetting",
+          GST_STIME_ARGS (delta_64));
+      delta_64 = delta_32 * GST_MSECOND;
     }
 
     GST_BUFFER_DTS (buffer) += delta_64;
