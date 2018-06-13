@@ -722,8 +722,8 @@ got_message (GstRtmpConnection * connection, GstBuffer * buffer,
 
   if (meta->size < min_size) {
     GST_DEBUG_OBJECT (self, "Ignoring too small %s message (%" G_GUINT32_FORMAT
-        " < %" G_GUINT32_FORMAT, gst_rtmp_message_type_get_nick (meta->type),
-        meta->size, min_size);
+        " < %" G_GUINT32_FORMAT ")",
+        gst_rtmp_message_type_get_nick (meta->type), meta->size, min_size);
     return;
   }
 
