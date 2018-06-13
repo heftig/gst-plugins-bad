@@ -514,12 +514,13 @@ gst_rtmp_chunk_stream_parse_header (GstRtmpChunkStream * cstream,
       delta_64 -= 1;
     }
 
+    delta_64 *= GST_MSECOND;
+
     if (delta_64 < 0) {
       GST_WARNING ("Timestamp regression: %" GST_STIME_FORMAT,
           GST_STIME_ARGS (delta_64));
     }
 
-    delta_64 *= GST_MSECOND;
     GST_BUFFER_DTS (buffer) += delta_64;
 
     GST_TRACE ("Adjusted buffer DTS (%" GST_TIME_FORMAT ") by %"
