@@ -20,6 +20,7 @@
 #include "gstrtmp2locationhandler.h"
 #include "rtmp/rtmputils.h"
 #include "rtmp/rtmpclient.h"
+#include <string.h>
 
 #define DEFAULT_SCHEME GST_RTMP_SCHEME_RTMP
 #define DEFAULT_HOST "localhost"
@@ -122,83 +123,12 @@ uri_handler_get_uri (GstURIHandler * handler)
 }
 
 static gboolean
-parse_path (const gchar * string, GstUri * uri, gchar ** application,
-    gchar ** stream, GError ** error)
-{
-  gchar *query;
-  GList *segments;
-  guint nsegments;
-
-  g_return_val_if_fail (uri, FALSE);
-  g_return_val_if_fail (application, FALSE);
-  g_return_val_if_fail (stream, FALSE);
-
-  query = gst_uri_get_query_string (uri);
-  segments = gst_uri_get_path_segments (uri);
-  nsegments = g_list_length (segments);
-
-  /* Test if too short, or not absolute */
-  if (nsegments < 3) {
-    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
-        "URI path too short: %s", string);
-    goto err;
-  }
-
-  if (segments->data != NULL) {
-    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
-        "URI path not absolute: %s", string);
-    goto err;
-  }
-
-  /* Strip root */
-  segments = g_list_delete_link (segments, segments);
-
-  /* Extract stream */
-  {
-    GList *segment = g_list_last (segments);
-    gchar *streamname = segment->data;
-
-    if (query && query[0]) {
-      *stream = g_strconcat (streamname ? streamname : "", "?", query, NULL);
-      g_free (streamname);
-    } else if (streamname) {
-      *stream = streamname;
-    } else {
-      g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
-          "URI lacks stream: %s", string);
-      goto err;
-    }
-
-    /* Strip stream, leaving app path */
-    segments = g_list_delete_link (segments, segment);
-  }
-
-  {
-    GstUri *tempuri =
-        gst_uri_new (NULL, NULL, NULL, GST_URI_NO_PORT, NULL, NULL, NULL);
-
-    gst_uri_set_path_segments (tempuri, segments);
-
-    *application = gst_uri_get_path (tempuri);
-    gst_uri_unref (tempuri);
-  }
-
-  g_free (query);
-  return TRUE;
-
-err:
-  g_list_free_full (segments, g_free);
-  g_free (query);
-  return FALSE;
-}
-
-static gboolean
 uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     GError ** error)
 {
   GstRtmpLocationHandler *self = GST_RTMP_LOCATION_HANDLER (handler);
   GstUri *uri;
-  const gchar *host, *userinfo;
+  const gchar *scheme_sep, *path_sep, *stream_sep, *host, *userinfo;
   GstRtmpScheme scheme;
   guint port;
   gboolean ret = FALSE;
@@ -206,7 +136,33 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   GST_DEBUG_OBJECT (self, "setting URI to %s", GST_STR_NULL (string));
   g_return_val_if_fail (string, FALSE);
 
-  uri = gst_uri_from_string (string);
+  scheme_sep = strstr (string, "://");
+  if (!scheme_sep) {
+    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+        "URI lacks scheme: %s", string);
+    return FALSE;
+  }
+
+  path_sep = strchr (scheme_sep + 3, '/');
+  if (!path_sep) {
+    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+        "URI lacks path: %s", string);
+    return FALSE;
+  }
+
+  stream_sep = strrchr (path_sep + 1, '/');
+  if (!stream_sep) {
+    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
+        "URI lacks stream: %s", string);
+    return FALSE;
+  }
+
+  {
+    gchar *string_without_path = g_strndup (string, path_sep - string);
+    uri = gst_uri_from_string (string_without_path);
+    g_free (string_without_path);
+  }
+
   if (!uri) {
     g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_URI,
         "URI failed to parse: %s", string);
@@ -235,18 +191,14 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   }
 
   {
-    gchar *application, *stream;
-
-    if (!parse_path (string, uri, &application, &stream, error)) {
-      goto out;
-    }
+    const gchar *path = path_sep + 1, *stream = stream_sep + 1;
+    gchar *application = g_strndup (path, stream_sep - path);
 
     g_object_set (self, "scheme", scheme, "host", host, "port", port,
         "application", application, "stream", stream, "username", NULL,
         "password", NULL, NULL);
 
     g_free (application);
-    g_free (stream);
   }
 
   userinfo = gst_uri_get_userinfo (uri);
