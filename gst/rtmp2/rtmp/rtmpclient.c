@@ -205,7 +205,7 @@ gst_rtmp_location_get_string (const GstRtmpLocation * location,
     gboolean with_stream)
 {
   GstUri *uri;
-  gchar *string;
+  gchar *base, *string;
   const gchar *scheme_string;
   guint default_port;
 
@@ -217,19 +217,12 @@ gst_rtmp_location_get_string (const GstRtmpLocation * location,
   uri = gst_uri_new (scheme_string, NULL, location->host,
       location->port == default_port ? GST_URI_NO_PORT : location->port, "/",
       NULL, NULL);
+  base = gst_uri_to_string (uri);
 
-  gst_uri_append_path (uri, location->application);
+  string = g_strconcat (base, location->application, with_stream ? "/" : NULL,
+      location->stream, NULL);
 
-  if (with_stream && location->stream) {
-    gchar **parts = g_strsplit (location->stream, "?", 2);
-    gst_uri_append_path_segment (uri, parts[0]);
-    if (parts[0] && parts[1]) {
-      gst_uri_set_query_string (uri, parts[1]);
-    }
-    g_strfreev (parts);
-  }
-
-  string = gst_uri_to_string (uri);
+  g_free (base);
   gst_uri_unref (uri);
 
   return string;
