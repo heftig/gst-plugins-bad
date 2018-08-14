@@ -198,7 +198,7 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
 {
   GstRtmpLocationHandler *self = GST_RTMP_LOCATION_HANDLER (handler);
   GstUri *uri;
-  const gchar *scheme_string, *host, *userinfo;
+  const gchar *host, *userinfo;
   GstRtmpScheme scheme;
   gchar *application, *stream;
   guint port;
@@ -215,17 +215,10 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
 
   gst_uri_normalize (uri);
 
-  scheme_string = gst_uri_get_scheme (uri);
-  if (!scheme_string) {
-    g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
-        "URI lacks scheme: %s", string);
-    goto out;
-  }
-
-  scheme = gst_rtmp_scheme_from_string (scheme_string);
+  scheme = gst_rtmp_scheme_from_uri (uri);
   if (scheme < 0) {
     g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_REFERENCE,
-        "URI has bad scheme '%s': %s", scheme_string, string);
+        "URI has bad scheme: %s", string);
     goto out;
   }
 

@@ -96,6 +96,17 @@ gst_rtmp_scheme_from_string (const gchar * string)
   return -1;
 }
 
+GstRtmpScheme
+gst_rtmp_scheme_from_uri (const GstUri * uri)
+{
+  const gchar *scheme = gst_uri_get_scheme (uri);
+  if (!scheme) {
+    return GST_RTMP_SCHEME_RTMP;
+  }
+
+  return gst_rtmp_scheme_from_string (scheme);
+}
+
 const gchar *
 gst_rtmp_scheme_to_string (GstRtmpScheme scheme)
 {
