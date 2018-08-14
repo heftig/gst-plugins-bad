@@ -200,7 +200,6 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   GstUri *uri;
   const gchar *host, *userinfo;
   GstRtmpScheme scheme;
-  gchar *application, *stream;
   guint port;
   gboolean ret = FALSE;
 
@@ -235,16 +234,20 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
     port = gst_rtmp_scheme_get_default_port (scheme);
   }
 
-  if (!parse_path (string, uri, &application, &stream, error)) {
-    goto out;
+  {
+    gchar *application, *stream;
+
+    if (!parse_path (string, uri, &application, &stream, error)) {
+      goto out;
+    }
+
+    g_object_set (self, "scheme", scheme, "host", host, "port", port,
+        "application", application, "stream", stream, "username", NULL,
+        "password", NULL, NULL);
+
+    g_free (application);
+    g_free (stream);
   }
-
-  g_object_set (self, "scheme", scheme, "host", host, "port", port,
-      "application", application, "stream", stream, "username", NULL,
-      "password", NULL, NULL);
-
-  g_free (application);
-  g_free (stream);
 
   userinfo = gst_uri_get_userinfo (uri);
   if (userinfo) {
