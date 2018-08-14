@@ -205,11 +205,12 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   gboolean ret = FALSE;
 
   GST_DEBUG_OBJECT (self, "setting URI to %s", GST_STR_NULL (string));
+  g_return_val_if_fail (string, FALSE);
 
   uri = gst_uri_from_string (string);
   if (!uri) {
     g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_URI,
-        "URI failed to parse: %s", GST_STR_NULL (string));
+        "URI failed to parse: %s", string);
     return FALSE;
   }
 
