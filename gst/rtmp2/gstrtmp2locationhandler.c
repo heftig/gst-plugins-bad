@@ -133,7 +133,7 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   guint port;
   gboolean ret = FALSE;
 
-  GST_DEBUG_OBJECT (self, "setting URI to %s", GST_STR_NULL (string));
+  GST_DEBUG_OBJECT (self, "setting URI from %s", GST_STR_NULL (string));
   g_return_val_if_fail (string, FALSE);
 
   scheme_sep = strstr (string, "://");
@@ -193,6 +193,9 @@ uri_handler_set_uri (GstURIHandler * handler, const gchar * string,
   {
     const gchar *path = path_sep + 1, *stream = stream_sep + 1;
     gchar *application = g_strndup (path, stream_sep - path);
+
+    GST_DEBUG_OBJECT (self, "setting location to %s://%s:%u/%s stream %s",
+        gst_rtmp_scheme_to_string (scheme), host, port, application, stream);
 
     g_object_set (self, "scheme", scheme, "host", host, "port", port,
         "application", application, "stream", stream, "username", NULL,
