@@ -41,8 +41,8 @@ GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
 static void
 gst_rtmp_location_handler_default_init (GstRtmpLocationHandlerInterface * iface)
 {
-  GST_DEBUG_CATEGORY_INIT (GST_CAT_DEFAULT, "rtmp2urihandler", 0,
-      "RTMP2 URI Handling");
+  GST_DEBUG_CATEGORY_INIT (GST_CAT_DEFAULT, "rtmp2locationhandler", 0,
+      "RTMP2 Location Handling");
 
   g_object_interface_install_property (iface, g_param_spec_string ("location",
           "Location", "Location of RTMP stream to access", DEFAULT_LOCATION,
