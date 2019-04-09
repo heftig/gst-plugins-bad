@@ -420,7 +420,8 @@ gst_amf_node_take_string (GstAmfNode * node, gchar * value, gssize size)
   }
 
   if (size > G_MAXUINT32) {
-    GST_WARNING ("Long string too long (%zu), truncating", size);
+    GST_WARNING ("Long string too long (%" G_GSSIZE_FORMAT "), truncating",
+        size);
     size = G_MAXUINT32;
     value[size] = 0;
   }
@@ -686,7 +687,7 @@ read_string (AmfParser * parser, gsize size)
   }
 
   if (size > parser->size - parser->offset) {
-    GST_ERROR ("string too long (%zu)", size);
+    GST_ERROR ("string too long (%" G_GSIZE_FORMAT ")", size);
     return NULL;
   }
 
@@ -998,7 +999,7 @@ serialize_string (GByteArray * array, const gchar * string, gssize size)
   }
 
   if (size > G_MAXUINT16) {
-    GST_WARNING ("String too long: %zu", size);
+    GST_WARNING ("String too long: %" G_GSSIZE_FORMAT, size);
     size = G_MAXUINT16;
   }
 
@@ -1014,7 +1015,7 @@ serialize_long_string (GByteArray * array, const gchar * string, gssize size)
   }
 
   if (size > G_MAXUINT32) {
-    GST_WARNING ("Long string too long: %zu", size);
+    GST_WARNING ("Long string too long: %" G_GSSIZE_FORMAT, size);
     size = G_MAXUINT32;
   }
 
