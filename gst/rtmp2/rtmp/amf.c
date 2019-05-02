@@ -193,7 +193,7 @@ GstAmfNode *
 gst_amf_node_new_boolean (gboolean value)
 {
   GstAmfNode *node = node_new (GST_AMF_TYPE_BOOLEAN);
-  node->value.v_int = ! !value;
+  node->value.v_int = !!value;
   return node;
 }
 
@@ -397,7 +397,7 @@ void
 gst_amf_node_set_boolean (GstAmfNode * node, gboolean value)
 {
   g_return_if_fail (node->type == GST_AMF_TYPE_BOOLEAN);
-  node->value.v_int = ! !value;
+  node->value.v_int = !!value;
 }
 
 void
@@ -673,7 +673,7 @@ parse_boolean (AmfParser * parser)
   }
 
   value = parse_u8 (parser);
-  return ! !value;
+  return !!value;
 }
 
 static inline GBytes *
