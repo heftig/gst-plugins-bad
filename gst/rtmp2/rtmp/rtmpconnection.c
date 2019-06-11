@@ -258,6 +258,12 @@ gst_rtmp_connection_finalize (GObject * object)
   G_OBJECT_CLASS (gst_rtmp_connection_parent_class)->finalize (object);
 }
 
+GSocket *
+gst_rtmp_connection_get_socket (GstRtmpConnection * sc)
+{
+  return g_socket_connection_get_socket (sc->connection);
+}
+
 static void
 gst_rtmp_connection_set_socket_connection (GstRtmpConnection * sc,
     GSocketConnection * connection)
