@@ -45,6 +45,7 @@
 
 #include <gst/gst.h>
 #include <gst/base/gstbasesink.h>
+#include <gio/gnetworking.h>
 #include <string.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_rtmp2_sink_debug_category);
@@ -113,6 +114,8 @@ static void start_publish_done (GObject * source, GAsyncResult * result,
     gpointer user_data);
 static void connect_task_done (GObject * object, GAsyncResult * result,
     gpointer user_data);
+
+static void set_pacing_rate (GstRtmp2Sink * self);
 
 enum
 {
@@ -307,6 +310,10 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
       GST_OBJECT_LOCK (self);
       self->peak_kbps = g_value_get_uint (value);
       GST_OBJECT_UNLOCK (self);
+
+      g_mutex_lock (&self->lock);
+      set_pacing_rate (self);
+      g_mutex_unlock (&self->lock);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -996,6 +1003,7 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
 
   self->connection = g_task_propagate_pointer (task, &error);
   if (self->connection) {
+    set_pacing_rate (self);
     gst_rtmp_connection_set_output_handler (self->connection,
         put_chunk, g_object_ref (self), g_object_unref);
     g_signal_connect_object (self->connection, "error",
@@ -1008,4 +1016,46 @@ connect_task_done (GObject * object, GAsyncResult * result, gpointer user_data)
 
   g_cond_broadcast (&self->cond);
   g_mutex_unlock (&self->lock);
+}
+
+static gboolean
+socket_set_pacing_rate (GSocket * socket, gint pacing_rate, GError ** error)
+{
+#ifdef SO_MAX_PACING_RATE
+  if (!g_socket_set_option (socket, SOL_SOCKET, SO_MAX_PACING_RATE,
+          pacing_rate, error)) {
+    g_prefix_error (error, "setsockopt failed: ");
+    return FALSE;
+  }
+#else
+  if (pacing_rate != -1) {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+        "SO_MAX_PACING_RATE is not supported");
+    return FALSE;
+  }
+#endif
+
+  return TRUE;
+}
+
+static void
+set_pacing_rate (GstRtmp2Sink * self)
+{
+  GError *error = NULL;
+  gint pacing_rate;
+
+  if (!self->connection)
+    return;
+
+  GST_OBJECT_LOCK (self);
+  pacing_rate = self->peak_kbps ? self->peak_kbps * 125 : -1;
+  GST_OBJECT_UNLOCK (self);
+
+  if (socket_set_pacing_rate (gst_rtmp_connection_get_socket (self->connection),
+          pacing_rate, &error))
+    GST_INFO_OBJECT (self, "Set pacing rate to %d Bps", pacing_rate);
+  else
+    GST_WARNING_OBJECT (self, "Could not set pacing rate: %s", error->message);
+
+  g_clear_error (&error);
 }
