@@ -61,6 +61,7 @@ typedef struct
   /* properties */
   GstRtmpLocation location;
   gboolean async_connect;
+  guint peak_kbps;
 
   /* stuff */
   gboolean running, flushing;
@@ -129,6 +130,7 @@ enum
   PROP_TIMEOUT,
   PROP_TLS_VALIDATION_FLAGS,
   PROP_ASYNC_CONNECT,
+  PROP_PEAK_KBPS,
 };
 
 /* pad templates */
@@ -190,6 +192,12 @@ gst_rtmp2_sink_class_init (GstRtmp2SinkClass * klass)
       g_param_spec_boolean ("async-connect", "Async connect",
           "Connect on READY, otherwise on first push", TRUE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_PEAK_KBPS,
+      g_param_spec_uint ("peak-kbps", "Peak bitrate",
+          "Bitrate in kbit/sec to pace outgoing packets", 0, G_MAXINT / 125, 0,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+          GST_PARAM_MUTABLE_PLAYING));
 
   GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
       "debug category for rtmp2sink element");
@@ -295,6 +303,11 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
       self->async_connect = g_value_get_boolean (value);
       GST_OBJECT_UNLOCK (self);
       break;
+    case PROP_PEAK_KBPS:
+      GST_OBJECT_LOCK (self);
+      self->peak_kbps = g_value_get_uint (value);
+      GST_OBJECT_UNLOCK (self);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -372,6 +385,11 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
     case PROP_ASYNC_CONNECT:
       GST_OBJECT_LOCK (self);
       g_value_set_boolean (value, self->async_connect);
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_PEAK_KBPS:
+      GST_OBJECT_LOCK (self);
+      g_value_set_uint (value, self->peak_kbps);
       GST_OBJECT_UNLOCK (self);
       break;
     default:
