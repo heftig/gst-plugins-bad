@@ -75,10 +75,10 @@ struct _GstRtmpConnection
   /* RTMP configuration */
   gsize in_chunk_size;
   gsize out_chunk_size;
-  gsize window_ack_size;
+  gsize in_window_ack_size;
+  gsize out_window_ack_size;
   gsize total_input_bytes;
   gsize bytes_since_ack;
-  gsize peer_bandwidth;
 };
 
 
@@ -428,7 +428,7 @@ gst_rtmp_connection_input_ready (GInputStream * is, gpointer user_data)
 
   sc->total_input_bytes += ret;
   sc->bytes_since_ack += ret;
-  if (sc->bytes_since_ack >= sc->window_ack_size) {
+  if (sc->bytes_since_ack >= sc->in_window_ack_size) {
     gst_rtmp_connection_send_ack (sc);
   }
 
@@ -654,15 +654,15 @@ gst_rtmp_connection_handle_protocol_control (GstRtmpConnection * connection,
 
     case GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE:
       GST_INFO ("window ack size: %" G_GUINT32_FORMAT, pc.param);
-      connection->window_ack_size = pc.param;
+      connection->in_window_ack_size = pc.param;
       break;
 
     case GST_RTMP_MESSAGE_TYPE_SET_PEER_BANDWIDTH:
       GST_FIXME ("set peer bandwidth: %" G_GUINT32_FORMAT ", %"
           G_GUINT32_FORMAT, pc.param, pc.param2);
       /* FIXME this is not correct, but close enough */
-      if (connection->peer_bandwidth != pc.param) {
-        connection->peer_bandwidth = pc.param;
+      if (connection->out_window_ack_size != pc.param) {
+        connection->out_window_ack_size = pc.param;
         gst_rtmp_connection_send_window_size_request (connection);
       }
       break;
@@ -986,7 +986,7 @@ gst_rtmp_connection_send_window_size_request (GstRtmpConnection * connection)
 {
   GstRtmpProtocolControl pc = {
     .type = GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE,
-    .param = connection->peer_bandwidth,
+    .param = connection->out_window_ack_size,
   };
 
   gst_rtmp_connection_queue_message (connection,
