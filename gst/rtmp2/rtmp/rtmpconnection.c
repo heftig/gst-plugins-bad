@@ -114,8 +114,6 @@ static void gst_rtmp_connection_send_ack (GstRtmpConnection * connection);
 static void
 gst_rtmp_connection_send_ping_response (GstRtmpConnection * connection,
     guint32 event_data);
-static void gst_rtmp_connection_send_window_size_request (GstRtmpConnection *
-    connection);
 
 typedef struct
 {
@@ -661,10 +659,7 @@ gst_rtmp_connection_handle_protocol_control (GstRtmpConnection * connection,
       GST_FIXME ("set peer bandwidth: %" G_GUINT32_FORMAT ", %"
           G_GUINT32_FORMAT, pc.param, pc.param2);
       /* FIXME this is not correct, but close enough */
-      if (connection->out_window_ack_size != pc.param) {
-        connection->out_window_ack_size = pc.param;
-        gst_rtmp_connection_send_window_size_request (connection);
-      }
+      gst_rtmp_connection_request_window_size (connection, pc.param);
       break;
 
     default:
@@ -981,13 +976,19 @@ gst_rtmp_connection_send_ping_response (GstRtmpConnection * connection,
       gst_rtmp_message_new_user_control (&uc));
 }
 
-static void
-gst_rtmp_connection_send_window_size_request (GstRtmpConnection * connection)
+void
+gst_rtmp_connection_request_window_size (GstRtmpConnection * connection,
+    guint32 window_ack_size)
 {
   GstRtmpProtocolControl pc = {
     .type = GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE,
-    .param = connection->out_window_ack_size,
+    .param = window_ack_size,
   };
+
+  if (connection->out_window_ack_size == window_ack_size)
+    return;
+
+  connection->out_window_ack_size = window_ack_size;
 
   gst_rtmp_connection_queue_message (connection,
       gst_rtmp_message_new_protocol_control (&pc));

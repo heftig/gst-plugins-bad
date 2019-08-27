@@ -978,18 +978,6 @@ gst_rtmp_client_start_play_async (GstRtmpConnection * connection,
 }
 
 static void
-send_window_size_request (GstRtmpConnection * connection, guint32 bytes)
-{
-  GstRtmpUserControl uc = {
-    .type = GST_RTMP_MESSAGE_TYPE_WINDOW_ACK_SIZE,
-    .param = bytes,
-  };
-
-  gst_rtmp_connection_queue_message (connection,
-      gst_rtmp_message_new_user_control (&uc));
-}
-
-static void
 send_set_buffer_length (GstRtmpConnection * connection, guint32 stream,
     guint32 ms)
 {
@@ -1022,7 +1010,7 @@ send_create_stream (GTask * task)
         "FCPublish", command_object, stream_name, NULL);
   } else {
     /* Matches librtmp */
-    send_window_size_request (connection, 2500000);
+    gst_rtmp_connection_request_window_size (connection, 2500000);
     send_set_buffer_length (connection, 0, 300);
   }
 
