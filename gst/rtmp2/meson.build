@@ -1,0 +1,24 @@
+rtmp2_sources = [
+  'gstrtmp2.c',
+  'gstrtmp2sink.c',
+  'gstrtmp2src.c',
+  'rtmp/amf.c',
+  'rtmp/rtmpchunk.c',
+  'rtmp/rtmpclient.c',
+  'rtmp/rtmpconnection.c',
+  'rtmp/rtmpmessage.c',
+  'rtmp/rtmpserver.c',
+  'rtmp/rtmpstream.c',
+  'rtmp/rtmputils.c',
+]
+
+gstrtmp2 = library('gstrtmp2',
+  rtmp2_sources,
+  c_args : gst_plugins_bad_args,
+  include_directories : [configinc, libsinc],
+  dependencies : [gstbase_dep, gio_dep],
+  install : true,
+  install_dir : plugins_install_dir,
+)
+pkgconfig.generate(gstrtmp2, install_dir : plugins_pkgconfig_install_dir)
+plugins += [gstrtmp2]
