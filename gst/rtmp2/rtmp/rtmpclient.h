@@ -21,7 +21,7 @@
 #ifndef _GST_RTMP_CLIENT_H_
 #define _GST_RTMP_CLIENT_H_
 
-#include <rtmp/rtmpconnection.h>
+#include "rtmpconnection.h"
 
 G_BEGIN_DECLS
 
