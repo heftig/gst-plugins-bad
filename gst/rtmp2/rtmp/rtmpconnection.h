@@ -1,6 +1,7 @@
 /* GStreamer RTMP Library
  * Copyright (C) 2013 David Schleef <ds@schleef.org>
  * Copyright (C) 2017 Make.TV, Inc. <info@make.tv>
+ *   Contact: Jan Alexander Steffens (heftig) <jsteffens@make.tv>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
