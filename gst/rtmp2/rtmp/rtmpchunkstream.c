@@ -327,9 +327,8 @@ serialize_next (GstRtmpChunkStream * cstream, guint32 chunk_size,
 
   gst_buffer_unmap (ret, &map);
 
-  GST_BUFFER_OFFSET (ret) = cstream->offset +
-      GST_BUFFER_OFFSET_IS_VALID (cstream->buffer) ?
-      GST_BUFFER_OFFSET (cstream->buffer) : cstream->bytes;
+  GST_BUFFER_OFFSET (ret) = GST_BUFFER_OFFSET_IS_VALID (cstream->buffer) ?
+      GST_BUFFER_OFFSET (cstream->buffer) + cstream->offset : cstream->bytes;
   GST_BUFFER_OFFSET_END (ret) = GST_BUFFER_OFFSET (ret);
 
   if (meta->size > 0) {
