@@ -534,7 +534,9 @@ gst_rtmp2_src_create (GstBaseSrc * src, guint64 offset, guint size,
 
   meta = gst_buffer_get_rtmp_meta (message);
   if (!meta) {
-    GST_ERROR_OBJECT (self, "%" GST_PTR_FORMAT " has no RTMP meta", message);
+    GST_ELEMENT_ERROR (self, CORE, FAILED,
+        ("Internal error: No RTMP meta on buffer"),
+        ("No RTMP meta on %" GST_PTR_FORMAT, message));
     gst_buffer_unref (message);
     return GST_FLOW_ERROR;
   }
